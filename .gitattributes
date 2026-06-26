@@ -1,0 +1,4 @@
+# Gradle wrapper should keep executable permissions
+gradlew text eol=lf
+gradlew.bat text eol=crlf
+*.sh text eol=lf

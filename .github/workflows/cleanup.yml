@@ -1,0 +1,130 @@
+name: Cleanup Reciter TTS Artifacts & Cache
+
+on:
+  schedule:
+    # Run every Sunday at 03:00 UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      max_artifact_age_days:
+        description: 'Delete artifacts older than N days'
+        required: false
+        default: '14'
+        type: string
+      dry_run:
+        description: 'Preview deletions without actually deleting'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cleanup-artifacts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete old artifacts
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const maxAgeDays = parseInt('${{ github.event.inputs.max_artifact_age_days || '14' }}');
+            const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+            const cutoff = new Date(Date.now() - maxAgeDays * 24 * 60 * 60 * 1000);
+
+            console.log(`Deleting artifacts older than ${maxAgeDays} days (before ${cutoff.toISOString()})`);
+            if (dryRun) console.log('DRY RUN — no actual deletions');
+
+            let page = 1;
+            let totalDeleted = 0;
+            let totalFreed = 0;
+
+            while (true) {
+              const { data: artifacts } = await github.rest.actions.listArtifactsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+                page: page
+              });
+
+              if (artifacts.artifacts.length === 0) break;
+
+              for (const artifact of artifacts.artifacts) {
+                const createdAt = new Date(artifact.created_at);
+                if (createdAt < cutoff) {
+                  const sizeMB = (artifact.size_in_bytes / 1024 / 1024).toFixed(1);
+                  console.log(`${dryRun ? '[DRY RUN] ' : ''}Deleting: ${artifact.name} (${sizeMB} MB, created ${artifact.created_at})`);
+                  if (!dryRun) {
+                    await github.rest.actions.deleteArtifact({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      artifact_id: artifact.id
+                    });
+                  }
+                  totalDeleted++;
+                  totalFreed += artifact.size_in_bytes;
+                }
+              }
+
+              page++;
+            }
+
+            const freedMB = (totalFreed / 1024 / 1024).toFixed(1);
+            console.log(`\nDone. ${totalDeleted} artifacts ${dryRun ? 'would be ' : ''}deleted, ${freedMB} MB freed.`);
+
+  cleanup-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cleanup stale caches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const dryRun = '${{ github.event.inputs.dry_run }}' === 'true';
+
+            console.log('Cleaning up GitHub Actions caches...');
+            if (dryRun) console.log('DRY RUN — no actual deletions');
+
+            // Delete caches from merged/closed PR branches
+            let page = 1;
+            let totalDeleted = 0;
+
+            while (true) {
+              const { data: caches } = await github.rest.actions.getActionsCacheList({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                per_page: 100,
+                page: page,
+                sort: 'last_accessed_at',
+                direction: 'asc'
+              });
+
+              if (caches.actions_caches.length === 0) break;
+
+              for (const cache of caches.actions_caches) {
+                const ref = cache.ref || '';
+                const lastAccessed = new Date(cache.last_accessed_at);
+                const ageDays = Math.floor((Date.now() - lastAccessed.getTime()) / (1000 * 60 * 60 * 24));
+
+                // Delete caches from non-default branches older than 7 days
+                const isDefaultBranch = ref === 'refs/heads/main' || ref === 'refs/heads/master';
+                const shouldDelete = !isDefaultBranch && ageDays > 7;
+
+                if (shouldDelete) {
+                  const sizeMB = ((cache.size_in_bytes || 0) / 1024 / 1024).toFixed(1);
+                  console.log(`${dryRun ? '[DRY RUN] ' : ''}Deleting cache: ${cache.key} (${sizeMB} MB, ref: ${ref}, age: ${ageDays}d)`);
+                  if (!dryRun) {
+                    await github.rest.actions.deleteActionsCacheById({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      cache_id: cache.id
+                    });
+                  }
+                  totalDeleted++;
+                }
+              }
+
+              page++;
+            }
+
+            console.log(`\nDone. ${totalDeleted} caches ${dryRun ? 'would be ' : ''}deleted.`);
