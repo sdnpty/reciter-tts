@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "qwen3-tts-12hz-0.6b",
+  "displayName": "Qwen3 TTS 0.6B",
+  "family": "qwen3-tts",
+  "architecture": "qwen3-codec",
+  "sampleRateHz": 24000,
+  "codecFrameRateHz": 12,
+  "audioTokenStart": 151936,
+  "eosTokenId": 151645,
+  "tokenizer": { "type": "qwen-bpe", "files": ["vocab.json", "merges.txt"] },
+  "files": [
+    { "filename": "talker_base_android.onnx",         "role": "TALKER",          "sizeMb": 428, "required": true },
+    { "filename": "code_predictor_base_android.onnx", "role": "CODE_PREDICTOR",  "sizeMb": 77,  "required": false },
+    { "filename": "code2wav_android.onnx",            "role": "VOCODER",         "sizeMb": 210, "required": true },
+    { "filename": "speaker_encoder_android.onnx",     "role": "SPEAKER_ENCODER", "sizeMb": 9,   "required": false }
+  ],
+  "voices": [
+    { "id": "qwen3_ru", "locale": "ru-RU", "displayName": "Русский", "speakerId": 0 },
+    { "id": "qwen3_en", "locale": "en-US", "displayName": "English", "speakerId": 1 },
+    { "id": "qwen3_zh", "locale": "zh-CN", "displayName": "中文",     "speakerId": 2 }
+  ]
+}

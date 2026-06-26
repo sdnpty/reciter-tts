@@ -1,11 +1,86 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="black">#FF000000</color>
-    <color name="white">#FFFFFFFF</color>
-    <color name="green">#FF4CAF50</color>
-    <color name="amber">#FFFFC107</color>
-    <color name="slate_400">#FF94A3B8</color>
-    <color name="primary">#FF1976D2</color>
-    <color name="primary_dark">#FF0D47A1</color>
-    <color name="accent">#FF03A9F4</color>
+    <!-- === GRAPHITE DARK DESIGN SYSTEM === -->
+
+    <!-- Primary Accent: Green -->
+    <color name="primary">#10B981</color>          <!-- Emerald 500 -->
+    <color name="primary_light">#34D399</color>    <!-- Emerald 400 -->
+    <color name="primary_dark">#059669</color>     <!-- Emerald 600 -->
+    <color name="primary_surface">#064E3B</color>  <!-- Emerald 900 -->
+    <color name="accent">#10B981</color>
+    <color name="accent_variant">#059669</color>
+    <color name="accent_surface">#065F46</color>   <!-- Emerald 800 -->
+
+    <!-- Secondary: Subtle warm white glow -->
+    <color name="secondary">#E4E4E7</color>        <!-- Zinc 200 -->
+    <color name="secondary_surface">#27272A</color>
+
+    <!-- Semantic -->
+    <color name="green">#4ADE80</color>            <!-- Green 400 -->
+    <color name="green_surface">#14532D</color>
+    <color name="red">#F87171</color>              <!-- Red 400 -->
+    <color name="red_surface">#3B0808</color>
+    <color name="amber">#FCD34D</color>            <!-- Amber 300 -->
+    <color name="amber_surface">#3B2000</color>
+
+    <!-- Dark Background Scale (pure graphite) -->
+    <color name="bg_deep">#09090B</color>          <!-- Near black -->
+    <color name="bg_base">#0D0D0F</color>          <!-- Main background -->
+    <color name="bg_elevated">#18181B</color>       <!-- Cards: Zinc 900 -->
+    <color name="bg_surface">#1F1F22</color>        <!-- Elevated surface -->
+    <color name="bg_overlay">#27272A</color>        <!-- Hover: Zinc 800 -->
+
+    <!-- Glass card borders -->
+    <color name="glass_bg">#18181B</color>
+    <color name="glass_border">#3F3F46</color>     <!-- Zinc 700 -->
+
+    <!-- Hero gradient (emerald → teal → graphite) -->
+    <color name="hero_gradient_start">#10B981</color>
+    <color name="hero_gradient_center">#0E7C66</color>
+    <color name="hero_gradient_end">#18181B</color>
+
+    <!-- Selection -->
+    <color name="selection_highlight">#4010B981</color> <!-- Emerald 500 with 25% alpha -->
+
+    <!-- Text -->
+    <color name="text_primary">#FAFAFA</color>     <!-- Zinc 50 -->
+    <color name="text_secondary">#A1A1AA</color>   <!-- Zinc 400 -->
+    <color name="text_muted">#52525B</color>       <!-- Zinc 600 -->
+    <color name="text_accent">#D4D4D8</color>      <!-- Zinc 300 -->
+
+    <!-- Status -->
+    <color name="status_ready">#4ADE80</color>
+    <color name="status_loading">#FCD34D</color>
+    <color name="status_error">#F87171</color>
+
+    <!-- Terminal -->
+    <color name="terminal_green">#4ADE80</color>
+    <color name="terminal_bg">#09090B</color>
+    <color name="terminal_text">#86EFAC</color>    <!-- Green 300 -->
+
+    <!-- Legacy aliases -->
+    <color name="black">#FAFAFA</color>
+    <color name="white">#FFFFFF</color>
+    <color name="surface">#18181B</color>
+    <color name="surface_elevated">#1F1F22</color>
+    <color name="surface_container">#111113</color>
+
+    <!-- Slate scale (remapped to zinc for dark theme) -->
+    <color name="slate_50">#0D0D0F</color>
+    <color name="slate_100">#18181B</color>
+    <color name="slate_200">#1F1F22</color>
+    <color name="slate_300">#27272A</color>
+    <color name="slate_400">#3F3F46</color>
+    <color name="slate_500">#52525B</color>
+    <color name="slate_600">#71717A</color>
+    <color name="slate_700">#A1A1AA</color>
+    <color name="slate_800">#D4D4D8</color>
+    <color name="slate_900">#FAFAFA</color>
+
+    <!-- Legacy -->
+    <color name="purple_200">#A1A1AA</color>
+    <color name="teal_500">#71717A</color>
+    <color name="purple_700">#3F3F46</color>
+    <color name="teal_200">#D4D4D8</color>
+    <color name="teal_700">#52525B</color>
 </resources>

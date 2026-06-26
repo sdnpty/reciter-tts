@@ -1,17 +1,22 @@
-<?xml version="1.0" encoding="utf-8"?>
-<!-- Placeholder vector drawable for the Reciter TTS app icon. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
     <path
-        android:fillColor="#FF1976D2"
-        android:pathData="M54,54m-54,0a54,54 0,1 1,108 0a54,54 0,1 1,-108 0" />
+        android:fillColor="#020617"
+        android:pathData="M54,54m-50,0a50,50 0,1 1,100 0a50,50 0,1 1,-100 0" />
     <path
-        android:fillColor="#FFFFFFFF"
-        android:pathData="M30,42 L78,42 L78,66 L54,66 L42,78 L42,66 L30,66 Z" />
+        android:fillColor="#0EA5E9"
+        android:pathData="M54,12m-42,0a42,42 0,1 1,84 0a42,42 0,1 1,-84 0"
+        android:fillAlpha="0.18" />
     <path
-        android:fillColor="#FF1976D2"
-        android:pathData="M40,50 L68,50 M40,58 L60,58" />
+        android:fillColor="#38BDF8"
+        android:pathData="M30,36c0,-3.3 2.7,-6 6,-6h12c9.9,0 18,8.1 18,18s-8.1,18 -18,18h-8v14c0,2.2 -1.8,4 -4,4s-4,-1.8 -4,-4V36zM40,40v16h8c4.4,0 8,-3.6 8,-8s-3.6,-8 -8,-8h-8z" />
+    <path
+        android:strokeColor="#F8FAFC"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:fillColor="#00000000"
+        android:pathData="M68,38c4,4 6,9 6,16s-2,12 -6,16M80,28c7,7 11,16 11,26s-4,19 -11,26" />
 </vector>

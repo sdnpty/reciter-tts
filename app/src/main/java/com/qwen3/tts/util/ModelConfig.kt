@@ -6,281 +6,306 @@ import java.io.File
 import java.util.Locale
 
 /**
- * Central configuration and discovery hub for on-device TTS models.
+ * Model catalog + capability resolution.
  *
- * Models are installed in `<filesDir>/models/<slot_id>/` where each slot
- * contains an optional `model_manifest.json` plus ONNX files. When no
- * manifest is present a built-in default profile is used so the engine
- * can still attempt to load models by conventional filenames.
+ * A model set can ship a `model.json` manifest next to its ONNX files (inside
+ * the same ZIP). When present, the app reads the model's declared languages,
+ * voices, file roles, sample rate and token offsets from it — so new models of
+ * the family can be added without touching app code. When absent, the bundled
+ * [ACTIVE_PROFILE] is used as a fallback.
  */
 object ModelConfig {
 
-    // ── Constants ─────────────────────────────────────────────────────────────
+    const val MANIFEST_FILE = "model.json"
 
-    const val MANIFEST_FILE = "model_manifest.json"
-    private const val PREFS = "qwen3_tts_prefs"
-    private const val KEY_ACTIVE_MODEL = "active_model_slot"
-
-    /**
-     * Renames applied to ZIP entry basenames during extraction so that
-     * models with varying export names land under a canonical filename.
-     */
-    val ARCHIVE_RENAME_MAP: Map<String, String> = emptyMap()
-
-    // ── Data classes ──────────────────────────────────────────────────────────
+    data class ModelFile(
+        val filename: String,
+        val expectedSizeMb: Long,
+        val role: Role,
+        val requiredForSynthesis: Boolean = true
+    )
 
     enum class Role {
-        TALKER, CODE_PREDICTOR, VOCODER, SPEAKER_ENCODER, LM_HEAD, UNKNOWN
+        // qwen3-codec / vits
+        TALKER, CODE_PREDICTOR, VOCODER, SPEAKER_ENCODER,
+        // cosyvoice / flow-matching families
+        LLM, FLOW, SPEECH_TOKENIZER;
+        companion object {
+            fun fromString(s: String): Role? = entries.firstOrNull { it.name.equals(s, true) }
+        }
     }
-
-    data class ModelFileSpec(
-        val filename: String,
-        val role: Role = Role.UNKNOWN,
-        val requiredForSynthesis: Boolean = true,
-        val expectedSizeMb: Int = 0
-    )
 
     data class VoiceSpec(
         val id: String,
+        val locale: String,        // BCP-47-ish, e.g. "ru-RU"
         val displayName: String,
-        val languageCode: String,   // BCP-47 primary language, e.g. "ru"
-        val countryCode: String = "",
+        val speakerId: Int = 0,
         val quality: String = "very_high"
     ) {
-        fun toLocale(): Locale = if (countryCode.isNotBlank())
-            Locale(languageCode, countryCode)
-        else
-            Locale(languageCode)
-
-        /** Returns the primary language tag (e.g. "ru", "en", "zh"). */
-        fun languageTag(): String = languageCode
+        fun toLocale(): Locale {
+            val parts = locale.split('-', '_')
+            return when (parts.size) {
+                1 -> Locale(parts[0])
+                2 -> Locale(parts[0], parts[1])
+                else -> Locale(parts[0], parts[1], parts[2])
+            }
+        }
+        fun languageTag(): String = locale.split('-', '_').firstOrNull()?.lowercase() ?: locale
     }
 
     data class ModelProfile(
         val id: String,
         val displayName: String,
-        val architecture: String = "qwen3-codec",
-        val sampleRateHz: Int = 24_000,
-        val audioTokenStart: Int = TokenizerConstants.AUDIO_TOKEN_START,
-        val eosTokenId: Int = TokenizerConstants.EOS_ID,
-        val modelFiles: List<ModelFileSpec> = emptyList(),
-        val voices: List<VoiceSpec> = emptyList(),
-        val tokenizerFiles: List<String> = listOf("vocab.json", "merges.txt"),
-        val languages: List<String> = emptyList()
+        val family: String,
+        /**
+         * Inference architecture. Selects which engine runs the model:
+         *  - "qwen3-codec": autoregressive talker → neural codec → code2wav (default)
+         *  - "vits": single-shot VITS (MMS-TTS / Piper) input_ids → waveform
+         * Other families (cosyvoice, f5, xtts) are planned — see docs/MODELS.md.
+         */
+        val architecture: String,
+        val sampleRateHz: Int,
+        val codecFrameRateHz: Int,
+        val audioTokenStart: Int,
+        val eosTokenId: Int,
+        val modelFiles: List<ModelFile>,
+        val tokenizerFiles: List<String>,
+        val voices: List<VoiceSpec>
     ) {
+        /** Distinct primary language tags, in declared order. */
+        val languages: List<String> get() = voices.map { it.languageTag() }.distinct()
+
         fun defaultVoice(): VoiceSpec? = voices.firstOrNull()
-        fun voiceById(id: String): VoiceSpec? = voices.firstOrNull { it.id == id }
+
+        fun voiceById(id: String?): VoiceSpec? = voices.firstOrNull { it.id == id }
+
         fun voiceForLanguage(lang: String): VoiceSpec? =
-            voices.firstOrNull { it.languageCode.equals(lang, ignoreCase = true) }
+            voices.firstOrNull { it.languageTag().equals(lang, true) }
     }
 
-    data class InstalledModel(
-        val id: String,
-        val dir: File,
-        val profile: ModelProfile
-    )
+    // ── Bundled fallback profile (Qwen3-TTS 0.6B) ────────────────
 
-    // ── Default / fallback profile ────────────────────────────────────────────
-
-    private val DEFAULT_PROFILE = ModelProfile(
-        id = "qwen3_tts_base",
-        displayName = "Qwen3-TTS Base",
+    val QWEN3_TTS_12HZ_06B = ModelProfile(
+        id = "qwen3-tts-12hz-0.6b",
+        displayName = "Qwen3 TTS 12Hz 0.6B",
+        family = "qwen3-tts",
         architecture = "qwen3-codec",
         sampleRateHz = 24_000,
-        audioTokenStart = TokenizerConstants.AUDIO_TOKEN_START,
-        eosTokenId = TokenizerConstants.EOS_ID,
+        codecFrameRateHz = 12,
+        audioTokenStart = 151_936,
+        eosTokenId = 151_645,
         modelFiles = listOf(
-            ModelFileSpec("talker_base_android.onnx", Role.TALKER, true, 428),
-            ModelFileSpec("code_predictor_base_android.onnx", Role.CODE_PREDICTOR, false, 60),
-            ModelFileSpec("code2wav_android.onnx", Role.VOCODER, true, 120),
-            ModelFileSpec("speaker_encoder_android.onnx", Role.SPEAKER_ENCODER, false, 30)
-        ),
-        voices = listOf(
-            VoiceSpec("qwen3_ru", "Russian", "ru", "RU", "very_high"),
-            VoiceSpec("qwen3_en", "English", "en", "US", "very_high"),
-            VoiceSpec("qwen3_zh", "Chinese", "zh", "CN", "very_high")
+            ModelFile("talker_base_android.onnx", 428L, Role.TALKER),
+            ModelFile("code_predictor_base_android.onnx", 77L, Role.CODE_PREDICTOR, requiredForSynthesis = false),
+            ModelFile("code2wav_android.onnx", 210L, Role.VOCODER),
+            ModelFile("speaker_encoder_android.onnx", 9L, Role.SPEAKER_ENCODER, requiredForSynthesis = false)
         ),
         tokenizerFiles = listOf("vocab.json", "merges.txt"),
-        languages = listOf("ru", "en", "zh")
+        voices = listOf(
+            VoiceSpec("qwen3_ru", "ru-RU", "Русский", speakerId = 0),
+            VoiceSpec("qwen3_en", "en-US", "English", speakerId = 1),
+            VoiceSpec("qwen3_zh", "zh-CN", "中文", speakerId = 2)
+        )
     )
 
-    // ── Profile cache ─────────────────────────────────────────────────────────
+    val SUPPORTED_PROFILES: List<ModelProfile> = listOf(QWEN3_TTS_12HZ_06B)
 
-    @Volatile
-    private var cachedProfile: ModelProfile? = null
+    /** Compile-time fallback when no manifest is installed. */
+    val ACTIVE_PROFILE: ModelProfile = QWEN3_TTS_12HZ_06B
 
-    fun invalidateProfileCache() {
-        cachedProfile = null
-    }
+    val ARCHIVE_RENAME_MAP: Map<String, String>
+        get() = mapOf(
+            "talker_base.onnx" to "talker_base_android.onnx",
+            "code_predictor_base.onnx" to "code_predictor_base_android.onnx",
+            "code2wav.onnx" to "code2wav_android.onnx",
+            "speaker_encoder.onnx" to "speaker_encoder_android.onnx"
+        )
 
-    // ── Directory helpers ─────────────────────────────────────────────────────
+    // ── Directories & slots ──────────────────────────────────────
+    //
+    // Several models can be installed side by side, each in its own slot
+    // directory: models/<slotId>/. The legacy flat layout (ONNX files directly
+    // under models/) is still recognised as the "default" slot for backward
+    // compatibility. The active slot is stored in SharedPreferences.
 
+    private const val PREFS = "qwen3_tts_prefs"
+    private const val ACTIVE_KEY = "active_model_id"
+    private const val LEGACY_SLOT = "default"
+
+    /** Root directory that holds all model slots. */
     fun getModelsDir(context: Context): File =
-        File(context.filesDir, "models")
+        context.getExternalFilesDir("models") ?: File(context.filesDir, "models")
 
     fun getModelsDirOrCreate(context: Context): File =
-        getModelsDir(context).also { it.mkdirs() }
+        getModelsDir(context).also { if (!it.exists()) it.mkdirs() }
 
-    fun activeModelDir(context: Context): File {
-        val root = getModelsDir(context)
-        val slotId = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_ACTIVE_MODEL, null)
-        return if (slotId != null) File(root, slotId) else root
-    }
-
+    /** Resolve a model file within the active slot directory. */
     fun getModelFile(context: Context, filename: String): File =
         File(activeModelDir(context), filename)
 
-    // ── Active model ──────────────────────────────────────────────────────────
+    data class InstalledModel(val id: String, val dir: File, val profile: ModelProfile) {
+        fun synthesisReady(): Boolean =
+            profile.modelFiles.filter { it.requiredForSynthesis }.all { File(dir, it.filename).exists() }
+    }
 
-    fun setActiveModel(context: Context, slotId: String) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .edit().putString(KEY_ACTIVE_MODEL, slotId).apply()
-        invalidateProfileCache()
+    /** Scan the models root for installed models (subdir slots + legacy flat). */
+    fun installedModels(context: Context): List<InstalledModel> {
+        val root = getModelsDir(context)
+        val list = mutableListOf<InstalledModel>()
+
+        root.listFiles()
+            ?.filter { it.isDirectory && !it.name.startsWith("_") }
+            ?.sortedBy { it.name }
+            ?.forEach { dir ->
+                val hasManifest = File(dir, MANIFEST_FILE).exists()
+                val hasOnnx = dir.listFiles()?.any { it.name.endsWith(".onnx", ignoreCase = true) } == true
+                if (hasManifest || hasOnnx) {
+                    val profile = profileForDir(dir)
+                    val id = if (hasManifest) profile.id else dir.name
+                    list.add(InstalledModel(id, dir, profile))
+                }
+            }
+
+        // Legacy flat layout: ONNX files directly under the root.
+        val rootHasOnnx = root.listFiles()?.any { it.name.endsWith(".onnx", ignoreCase = true) } == true
+        if (rootHasOnnx) {
+            list.add(0, InstalledModel(LEGACY_SLOT, root, profileForDir(root)))
+        }
+        return list
     }
 
     fun activeModel(context: Context): InstalledModel? {
-        val all = installedModels(context)
-        if (all.isEmpty()) return null
-        val slotId = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getString(KEY_ACTIVE_MODEL, null)
-        return all.firstOrNull { it.id == slotId } ?: all.first()
+        val models = installedModels(context)
+        if (models.isEmpty()) return null
+        val stored = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(ACTIVE_KEY, null)
+        return models.firstOrNull { it.id == stored }
+            ?: models.firstOrNull { it.synthesisReady() }
+            ?: models.first()
+    }
+
+    fun activeModelDir(context: Context): File = activeModel(context)?.dir ?: getModelsDir(context)
+
+    fun setActiveModel(context: Context, id: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString(ACTIVE_KEY, id).apply()
+        invalidateProfileCache()
+    }
+
+    // ── Active profile resolution (manifest-aware, cached) ───────
+
+    @Volatile private var cachedProfile: ModelProfile? = null
+    @Volatile private var cachedKey: String = ""
+
+    private fun profileForDir(dir: File): ModelProfile {
+        val manifest = File(dir, MANIFEST_FILE)
+        return (if (manifest.exists()) parseManifest(manifest) else null) ?: ACTIVE_PROFILE
     }
 
     fun activeProfile(context: Context): ModelProfile {
-        cachedProfile?.let { return it }
-        val profile = loadProfileForDir(activeModelDir(context))
+        val dir = activeModelDir(context)
+        val manifest = File(dir, MANIFEST_FILE)
+        val key = "${dir.absolutePath}:${if (manifest.exists()) manifest.lastModified() else 0L}"
+        cachedProfile?.let { if (key == cachedKey) return it }
+        val profile = profileForDir(dir)
         cachedProfile = profile
+        cachedKey = key
         return profile
     }
 
-    // ── Installed model discovery ─────────────────────────────────────────────
-
-    fun installedModels(context: Context): List<InstalledModel> {
-        val root = getModelsDir(context)
-        if (!root.exists()) return emptyList()
-        // A slot is any subdirectory of root, or root itself if it directly contains ONNX files.
-        val subdirs = root.listFiles { f -> f.isDirectory } ?: emptyArray()
-        val result = mutableListOf<InstalledModel>()
-        for (dir in subdirs) {
-            val hasOnnx = dir.listFiles { f -> f.extension.equals("onnx", ignoreCase = true) }
-                ?.isNotEmpty() == true
-            val hasManifest = File(dir, MANIFEST_FILE).exists()
-            if (hasOnnx || hasManifest) {
-                val profile = loadProfileForDir(dir)
-                result.add(InstalledModel(dir.name, dir, profile))
-            }
-        }
-        // Also check root dir directly (legacy single-model layout)
-        if (result.isEmpty()) {
-            val rootOnnx = root.listFiles { f -> f.extension.equals("onnx", ignoreCase = true) }
-                ?.isNotEmpty() == true
-            if (rootOnnx) {
-                result.add(InstalledModel("default", root, loadProfileForDir(root)))
-            }
-        }
-        return result
+    /** Drop the cached profile (call after install/delete/switch). */
+    fun invalidateProfileCache() {
+        cachedProfile = null
+        cachedKey = ""
     }
 
-    // ── Validation ────────────────────────────────────────────────────────────
+    private fun parseManifest(file: File): ModelProfile? =
+        try { parseManifestJson(file.readText()) } catch (e: Exception) { null }
 
-    fun synthesisReady(context: Context): Boolean =
-        missingOnnxModels(context).isEmpty()
+    /** Parse a manifest from its JSON text. Visible for testing. */
+    internal fun parseManifestJson(text: String): ModelProfile? = try {
+        val json = JSONObject(text)
+        val fallback = ACTIVE_PROFILE
 
-    fun missingOnnxModels(context: Context): List<String> {
-        val profile = activeProfile(context)
-        val dir = activeModelDir(context)
-        return profile.modelFiles
-            .filter { it.requiredForSynthesis }
-            .map { it.filename }
-            .filter { !File(dir, it).exists() }
-    }
-
-    fun missingSynthesisModels(context: Context): List<String> = missingOnnxModels(context)
-
-    // ── Manifest parsing ──────────────────────────────────────────────────────
-
-    private fun loadProfileForDir(dir: File): ModelProfile {
-        val manifest = File(dir, MANIFEST_FILE)
-        if (!manifest.exists()) return DEFAULT_PROFILE
-        return try {
-            parseManifest(manifest.readText(), dir)
-        } catch (e: Exception) {
-            DEFAULT_PROFILE
-        }
-    }
-
-    private fun parseManifest(json: String, dir: File): ModelProfile {
-        val obj = JSONObject(json)
-        val id = obj.optString("id", "unknown")
-        val displayName = obj.optString("display_name", id)
-        val architecture = obj.optString("architecture", "qwen3-codec")
-        val sampleRate = obj.optInt("sample_rate_hz", 24_000)
-        val audioTokenStart = obj.optInt("audio_token_start", TokenizerConstants.AUDIO_TOKEN_START)
-        val eosTokenId = obj.optInt("eos_token_id", TokenizerConstants.EOS_ID)
-
-        // Parse model files
-        val modelFiles = mutableListOf<ModelFileSpec>()
-        val filesArray = obj.optJSONArray("model_files")
-        if (filesArray != null) {
-            for (i in 0 until filesArray.length()) {
-                val mf = filesArray.getJSONObject(i)
-                val filename = mf.getString("filename")
-                val roleStr = mf.optString("role", "UNKNOWN").uppercase()
-                val role = try { Role.valueOf(roleStr) } catch (_: Exception) { Role.UNKNOWN }
-                val required = mf.optBoolean("required_for_synthesis", true)
-                val expectedSizeMb = mf.optInt("expected_size_mb", 0)
-                modelFiles.add(ModelFileSpec(filename, role, required, expectedSizeMb))
-            }
-        } else {
-            // Fall back to scanning the directory for ONNX files
-            dir.listFiles { f -> f.extension.equals("onnx", ignoreCase = true) }
-                ?.forEach { f ->
-                    modelFiles.add(ModelFileSpec(f.name, Role.UNKNOWN, true, (f.length() / 1024 / 1024).toInt()))
-                }
-        }
-
-        // Parse voices
-        val voices = mutableListOf<VoiceSpec>()
-        val voicesArray = obj.optJSONArray("voices")
-        if (voicesArray != null) {
-            for (i in 0 until voicesArray.length()) {
-                val v = voicesArray.getJSONObject(i)
-                voices.add(
-                    VoiceSpec(
-                        id = v.getString("id"),
-                        displayName = v.optString("display_name", v.getString("id")),
-                        languageCode = v.optString("language", "ru"),
-                        countryCode = v.optString("country", ""),
-                        quality = v.optString("quality", "very_high")
-                    )
+        val files = json.optJSONArray("files")?.let { arr ->
+            (0 until arr.length()).mapNotNull { i ->
+                val o = arr.getJSONObject(i)
+                val role = Role.fromString(o.optString("role")) ?: return@mapNotNull null
+                ModelFile(
+                    filename = o.getString("filename"),
+                    expectedSizeMb = o.optLong("sizeMb", 0L),
+                    role = role,
+                    requiredForSynthesis = o.optBoolean("required", true)
                 )
             }
-        } else {
-            voices.addAll(DEFAULT_PROFILE.voices)
-        }
+        }?.takeIf { it.isNotEmpty() } ?: fallback.modelFiles
 
-        val tokenizerFiles = mutableListOf<String>()
-        val tokArray = obj.optJSONArray("tokenizer_files")
-        if (tokArray != null) {
-            for (i in 0 until tokArray.length()) tokenizerFiles.add(tokArray.getString(i))
-        } else {
-            tokenizerFiles.addAll(DEFAULT_PROFILE.tokenizerFiles)
-        }
+        val voices = json.optJSONArray("voices")?.let { arr ->
+            (0 until arr.length()).map { i ->
+                val o = arr.getJSONObject(i)
+                VoiceSpec(
+                    id = o.getString("id"),
+                    locale = o.optString("locale", "en-US"),
+                    displayName = o.optString("displayName", o.getString("id")),
+                    speakerId = o.optInt("speakerId", 0),
+                    quality = o.optString("quality", "very_high")
+                )
+            }
+        }?.takeIf { it.isNotEmpty() } ?: fallback.voices
 
-        val languages = voices.map { it.languageCode }.distinct()
+        val tokenizerFiles = json.optJSONObject("tokenizer")?.optJSONArray("files")?.let { arr ->
+            (0 until arr.length()).map { arr.getString(it) }
+        } ?: fallback.tokenizerFiles
 
-        return ModelProfile(
-            id = id,
-            displayName = displayName,
-            architecture = architecture,
-            sampleRateHz = sampleRate,
-            audioTokenStart = audioTokenStart,
-            eosTokenId = eosTokenId,
-            modelFiles = modelFiles,
-            voices = voices,
+        ModelProfile(
+            id = json.optString("id", fallback.id),
+            displayName = json.optString("displayName", fallback.displayName),
+            family = json.optString("family", fallback.family),
+            architecture = json.optString("architecture", fallback.architecture),
+            sampleRateHz = json.optInt("sampleRateHz", fallback.sampleRateHz),
+            codecFrameRateHz = json.optInt("codecFrameRateHz", fallback.codecFrameRateHz),
+            audioTokenStart = json.optInt("audioTokenStart", fallback.audioTokenStart),
+            eosTokenId = json.optInt("eosTokenId", fallback.eosTokenId),
+            modelFiles = files,
             tokenizerFiles = tokenizerFiles,
-            languages = languages
+            voices = voices
         )
+    } catch (e: Exception) {
+        null
+    }
+
+    // ── Presence / readiness (active-profile aware) ──────────────
+
+    private fun requiredArtifactFilenames(p: ModelProfile) =
+        p.modelFiles.map { it.filename } + p.tokenizerFiles
+
+    fun requiredModels(context: Context): List<ModelFile> = activeProfile(context).modelFiles
+
+    fun synthesisReady(context: Context): Boolean {
+        val dir = activeModelDir(context)
+        return activeProfile(context).modelFiles
+            .filter { it.requiredForSynthesis }
+            .all { File(dir, it.filename).exists() }
+    }
+
+    fun allModelsPresent(context: Context): Boolean {
+        val dir = activeModelDir(context)
+        return activeProfile(context).modelFiles.all { File(dir, it.filename).exists() }
+    }
+
+    fun missingOnnxModels(context: Context): List<String> {
+        val dir = activeModelDir(context)
+        return activeProfile(context).modelFiles
+            .map { it.filename }.filter { !File(dir, it).exists() }
+    }
+
+    fun missingSynthesisModels(context: Context): List<String> {
+        val dir = activeModelDir(context)
+        return activeProfile(context).modelFiles
+            .filter { it.requiredForSynthesis }
+            .map { it.filename }.filter { !File(dir, it).exists() }
+    }
+
+    fun missingArtifacts(context: Context): List<String> {
+        val dir = activeModelDir(context)
+        return requiredArtifactFilenames(activeProfile(context)).filter { !File(dir, it).exists() }
     }
 }

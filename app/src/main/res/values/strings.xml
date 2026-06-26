@@ -2,46 +2,110 @@
 <resources>
     <string name="app_name">Reciter TTS</string>
 
-    <!-- Synthesis fragment -->
-    <string name="btn_synthesize">Synthesize</string>
-    <string name="btn_stop_audio">Stop</string>
-    <string name="hint_text">Enter text to synthesize…</string>
-    <string name="sample_text_ru">Привет! Это тестовый текст для синтеза речи.</string>
-    <string name="sample_text_en">Hello! This is a test sentence for speech synthesis.</string>
-    <string name="sample_text_zh">你好！这是语音合成测试文本。</string>
-    <string name="sample_text_default">Hello! This is a test sentence.</string>
-    <string name="status_models_present">Models loaded — ready</string>
-    <string name="status_models_missing_details">Models missing: %1$s</string>
-    <string name="status_error">Synthesis failed</string>
-    <string name="status_downloading">Downloading…</string>
-    <string name="wav_saving">Saving WAV…</string>
-    <string name="wav_failed">Failed to save WAV</string>
-    <string name="wav_share_title">Share audio</string>
-    <string name="toast_default_tts_set">Could not open TTS settings</string>
+    <!-- Navigation -->
+    <string name="nav_synthesis">Синтез</string>
+    <string name="nav_models">Модели</string>
+    <string name="nav_settings">Настройки</string>
 
-    <!-- Models fragment -->
-    <string name="dialog_download_title">Download Models</string>
-    <string name="dialog_download_message">Enter the HTTPS URL of the model ZIP archive:</string>
-    <string name="dialog_download_progress">%1$d%% • %2$s / %3$s</string>
-    <string name="dialog_download_complete">Download and extraction complete!</string>
-    <string name="dialog_download_error">Download failed: %1$s</string>
-    <string name="dialog_extracting">Extracting models…</string>
-    <string name="dialog_delete_title">Delete Models</string>
-    <string name="dialog_delete_message">This will delete all downloaded model files. You will need to re-download them to use the TTS engine.</string>
-    <string name="dialog_yes">Yes</string>
-    <string name="dialog_no">No</string>
-    <string name="dialog_cancel">Cancel</string>
-    <string name="btn_delete_models">Delete Models</string>
-    <string name="error_empty_url">Please enter a URL</string>
-    <string name="extracting_progress">Extracting: %1$d / %2$d files</string>
-    <string name="toast_models_deleted">Models deleted</string>
+    <!-- Sample texts -->
+    <string name="sample_text_ru">Привет! Это Reciter TTS: локальный синтез речи на базе Qwen/Qwen3 для русского языка.</string>
+    <string name="sample_text_en">Hello! Reciter TTS runs neural speech synthesis fully on your device.</string>
+    <string name="sample_text_zh">你好！Reciter TTS 在设备上本地运行神经语音合成。</string>
+    <string name="sample_text_default">Reciter TTS — on-device neural speech synthesis.</string>
 
-    <!-- Settings fragment -->
-    <string name="app_version_format">Version %1$s (%2$d)</string>
-    <string name="log_empty">(no log entries yet)</string>
-    <string name="toast_logs_cleared">Logs cleared</string>
-    <string name="toast_logs_copied">Logs copied to clipboard</string>
-    <string name="model_switch_hint">Restart the TTS engine in Android Settings to apply the new model</string>
-    <string name="toast_no_logs">No logs available yet</string>
-    <string name="toast_share_failed">Could not share log file</string>
+    <!-- Languages -->
+    <string name="lang_ru">Русский</string>
+    <string name="lang_en">Английский</string>
+    <string name="lang_zh">Китайский</string>
+
+    <!-- Status -->
+    <string name="status_loading">Загрузка моделей…</string>
+    <string name="status_ready">Готов к работе</string>
+    <string name="status_error">Ошибка</string>
+    <string name="status_downloading">Загрузка…</string>
+    <string name="status_models_missing">Модели не найдены</string>
+    <string name="status_models_missing_details">Отсутствует: %1$s</string>
+    <string name="status_models_present">Модели загружены</string>
+    <string name="status_checking">Проверка моделей…</string>
+
+    <!-- Buttons -->
+    <string name="btn_synthesize">Озвучить</string>
+    <string name="btn_stop_audio">Остановить</string>
+    <string name="btn_set_default">Выбрать как TTS по умолчанию</string>
+    <string name="btn_save_wav">Сохранить в WAV</string>
+    <string name="wav_saving">Синтез в файл…</string>
+    <string name="wav_failed">Не удалось сохранить аудио</string>
+    <string name="wav_share_title">Поделиться аудио</string>
+    <string name="btn_download_models">Скачать модели</string>
+    <string name="btn_pick_local_zip">Выбрать локальный ZIP</string>
+    <string name="btn_delete_models">Удалить модели</string>
+    <string name="btn_stop_download">Остановить</string>
+    <string name="btn_share_short">Поделиться</string>
+    <string name="btn_clear_short">Очистить</string>
+    <string name="btn_copy_short">Копировать</string>
+    <string name="toast_logs_copied">Логи скопированы</string>
+
+    <!-- Labels -->
+    <string name="label_synthesis">Синтез речи</string>
+    <string name="label_model_status">Статус моделей</string>
+    <string name="label_audio_test">Проверка звука</string>
+    <string name="label_logs">Логи</string>
+
+    <!-- Audio test -->
+    <string name="test_sine">Синус</string>
+    <string name="test_sweep">Свип</string>
+
+    <!-- Hints -->
+    <string name="hint_text">Введите текст для озвучивания</string>
+
+    <!-- Preferences -->
+    <string name="pref_model_title">Активная модель</string>
+    <string name="model_none">Модели не установлены — импортируйте на вкладке «Модели».</string>
+    <string name="model_switch_hint">Смена модели применится при следующей загрузке движка.</string>
+    <string name="pref_category_voice">Голос</string>
+    <string name="pref_category_advanced">Движок</string>
+    <string name="pref_speaker_id">ID Диктора (0–9)</string>
+    <string name="pref_speed">Скорость</string>
+    <string name="pref_device">Устройство</string>
+    <string name="pref_logging">Подробное логирование</string>
+
+    <!-- Dialogs -->
+    <string name="dialog_download_title">Скачивание моделей</string>
+    <string name="dialog_download_message">Введите URL архива ONNX-моделей (~724 МБ). Рекомендуется использовать Wi-Fi.</string>
+    <string name="dialog_download_progress">Загрузка: %1$d%% (%2$s / %3$s)</string>
+    <string name="dialog_download_complete">Загрузка завершена!</string>
+    <string name="dialog_download_error">Ошибка загрузки: %1$s</string>
+    <string name="dialog_extracting">Распаковка…</string>
+    <string name="dialog_cancel">Отмена</string>
+    <string name="dialog_yes">Да</string>
+    <string name="dialog_no">Нет</string>
+    <string name="dialog_delete_title">Удаление моделей</string>
+    <string name="dialog_delete_message">Удалить все ONNX-модели? Это освободит ~724 МБ памяти.</string>
+
+    <!-- Toasts -->
+    <string name="toast_default_tts_set">Reciter TTS выбран по умолчанию!</string>
+    <string name="toast_models_deleted">Модели удалены</string>
+    <string name="toast_logs_cleared">Логи очищены</string>
+    <string name="toast_no_logs">Нет логов для отправки</string>
+
+    <!-- Extraction -->
+    <string name="extracting_progress">Распаковка: %1$d из %2$d файлов</string>
+    <string name="error_empty_zip">Архив ZIP пуст</string>
+    <string name="error_empty_url">Введите URL для скачивания моделей</string>
+
+    <!-- Logs -->
+    <string name="log_empty">Логи пусты.</string>
+
+    <!-- Version -->
+    <string name="app_version_format">Reciter TTS v%1$s (сборка %2$d)</string>
+
+    <!-- Hero / headers -->
+    <string name="hero_tagline">Нейросетевой синтез речи на устройстве</string>
+    <string name="header_synthesis_sub">Озвучивание текста голосом Qwen3</string>
+    <string name="header_models_sub">Загрузка и управление ONNX-моделями</string>
+    <string name="header_settings_sub">Голос, движок и диагностика</string>
+    <string name="label_text_input">Текст</string>
+    <string name="label_install_models">Установка моделей</string>
+    <string name="card_models_hint">Архив ~724 МБ с 4 ONNX-файлами. Рекомендуется Wi-Fi.</string>
+    <string name="engine_provider_hint">NNAPI может ускорить синтез, но на части устройств приводит к сбоям — при проблемах оставьте CPU.</string>
 </resources>

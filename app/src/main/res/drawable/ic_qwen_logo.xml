@@ -1,0 +1,19 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <!-- Outer refined circle -->
+    <path
+        android:pathData="M48,48 m-40,0 a40,40 0 1,0 80,0 a40,40 0 1,0 -80,0"
+        android:fillColor="#0EA5E9"
+        android:fillAlpha="0.1" />
+    
+    <!-- Sound waves stylized -->
+    <path
+        android:pathData="M32,32v32m8,-24v16m8,-24v32m8,-24v16m8,-24v32"
+        android:strokeColor="#0EA5E9"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

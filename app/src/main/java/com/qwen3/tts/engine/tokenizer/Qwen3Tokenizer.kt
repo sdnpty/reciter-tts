@@ -237,18 +237,6 @@ class Qwen3Tokenizer private constructor(
         }
     }
 
-    // Reverse vocab index (id → byte-encoded token string) for O(1) decode lookups.
-    // Built lazily once; avoids an O(N) linear scan through the entire vocab per token.
-    private val idToToken: Map<Int, String> = run {
-        val m = HashMap<Int, String>(vocab.size)
-        vocab.forEach { (key, id) -> m[id] = key }
-        m
-    }
-
-    // O(1) special-token lookup: use a Set instead of searching values for every token.
-    private val specialTokenIds: Set<Int> = specialTokens.values.toHashSet()
-
-    @Suppress("unused")
     private val cache = mutableMapOf<String, String>()
 
     fun encode(text: String, addSpecialTokens: Boolean = true): IntArray {
@@ -278,25 +266,21 @@ class Qwen3Tokenizer private constructor(
     }
 
     private fun encodeWord(word: String): List<Int> {
-        // Convert word to the byte-level BPE representation used by the Qwen/GPT-2 vocabulary.
-        // stringToBytes maps every UTF-8 byte to a unique Unicode character so that the
-        // encoded string can be looked up directly in vocab.
-        val byteStr = stringToBytes(word)
+        // Convert to BPE-friendly representation
+        var token = stringToBytes(word)
 
-        // BPE merge rules in merges.txt define which adjacent byte-pairs form longer subword
-        // units. Applying them as string replacements on the byte-encoded string would be a
-        // no-op (replacing "first+second" with "first+second"). Instead we rely on greedy
-        // longest-match scanning below: if a pair was merged in training, its concatenated
-        // form will be present as a key in vocab and will naturally win over the two separate
-        // byte entries. This matches the decoding behaviour used during model training for
-        // inference-only usage.
+        // Apply merges
+        for ((first, second) in merges) {
+            val merged = first + second
+            token = token.replace(first + second, merged)
+        }
 
-        // Split into subwords using greedy longest-match scan.
+        // Split into subwords and look up IDs
         val result = mutableListOf<Int>()
-        var remaining = byteStr
+        var remaining = token
         while (remaining.isNotEmpty()) {
             var found = false
-            // Try longest match first (avoids splitting known multi-byte subwords)
+            // Try longest match first
             for (len in remaining.length downTo 1) {
                 val sub = remaining.substring(0, len)
                 val id = vocab[sub]
@@ -308,7 +292,7 @@ class Qwen3Tokenizer private constructor(
                 }
             }
             if (!found) {
-                // Unknown token — emit UNK and advance one encoded character
+                // Unknown token — add UNK
                 result.add(UNK_ID)
                 remaining = remaining.drop(1)
             }
@@ -321,14 +305,15 @@ class Qwen3Tokenizer private constructor(
         val sb = StringBuilder()
         for (id in tokenIds) {
             if (skipSpecialTokens && isSpecialToken(id)) continue
-            // Use the pre-built reverse index for O(1) lookup instead of a linear scan
-            val token = idToToken[id] ?: continue
+            val token = vocab.entries.find { it.value == id }?.key ?: continue
             sb.append(bytesToChar(token))
         }
         return sb.toString()
     }
 
-    private fun isSpecialToken(id: Int): Boolean = id in specialTokenIds
+    private fun isSpecialToken(id: Int): Boolean {
+        return specialTokens.values.contains(id)
+    }
 
     fun getVocabSize(): Int = vocab.size
     fun getPadId(): Int = TokenizerConstants.PAD_ID
