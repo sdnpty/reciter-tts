@@ -126,25 +126,40 @@ class VitsInferenceEngine(
             }
             val shape = longArrayOf(1, ids.size.toLong())
             val idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(ids), shape)
-            val maskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(LongArray(ids.size) { 1L }), shape)
-
-            val inputs = HashMap<String, OnnxTensor>()
+            // Only create the mask tensor when the session actually has a mask input —
+            // allocating it unconditionally means it leaks when session.run() throws
+            // and it was never added to the inputs map.
             val names = s.inputNames
-            inputs[names.firstOrNull { it.contains("input") } ?: names.first()] = idsTensor
-            names.firstOrNull { it.contains("mask") }?.let { inputs[it] = maskTensor }
+            val maskInputName = names.firstOrNull { it.contains("mask") }
+            val maskTensor = if (maskInputName != null)
+                OnnxTensor.createTensor(env, LongBuffer.wrap(LongArray(ids.size) { 1L }), shape)
+            else null
 
-            val results = s.run(inputs)
-            val audio = extractAudio(results[0].value)
-            idsTensor.close(); maskTensor.close(); results.close()
+            try {
+                val inputs = HashMap<String, OnnxTensor>()
+                inputs[names.firstOrNull { it.contains("input") } ?: names.first()] = idsTensor
+                if (maskInputName != null && maskTensor != null) inputs[maskInputName] = maskTensor
 
-            if (audio.isEmpty()) {
-                onAudioChunk(null)
-                return
+                val results = s.run(inputs)
+                val audio: FloatArray
+                try {
+                    audio = extractAudio(results[0].value)
+                } finally {
+                    results.close()
+                }
+
+                if (audio.isEmpty()) {
+                    onAudioChunk(null)
+                    return
+                }
+                val paced = if (speed in 1..1000 && speed != 100) {
+                    AudioHelper.timeStretch(audio, speed / 100f, sampleRateHz)
+                } else audio
+                onAudioChunk(AudioHelper.floatToPcm16(paced))
+            } finally {
+                idsTensor.close()
+                maskTensor?.close()
             }
-            val paced = if (speed in 1..1000 && speed != 100) {
-                AudioHelper.timeStretch(audio, speed / 100f, sampleRateHz)
-            } else audio
-            onAudioChunk(AudioHelper.floatToPcm16(paced))
         } catch (e: Exception) {
             logger.e(TAG, "VITS synthesis failed: ${e.message}", e)
             onAudioChunk(null)
