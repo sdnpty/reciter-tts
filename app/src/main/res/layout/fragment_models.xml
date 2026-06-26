@@ -286,11 +286,21 @@
                         android:layout_height="46dp"
                         android:layout_marginEnd="8dp"
                         android:layout_weight="1"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
+                        android:letterSpacing="0"
+                        android:maxLines="1"
                         android:text="@string/test_sine"
                         android:textColor="@color/secondary"
-                        android:textSize="12sp"
+                        android:textSize="13sp"
                         app:backgroundTint="@color/secondary_surface"
-                        app:cornerRadius="14dp" />
+                        app:cornerRadius="14dp"
+                        app:minWidth="0dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnTestSweep"
@@ -298,22 +308,42 @@
                         android:layout_height="46dp"
                         android:layout_marginEnd="8dp"
                         android:layout_weight="1"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
+                        android:letterSpacing="0"
+                        android:maxLines="1"
                         android:text="@string/test_sweep"
                         android:textColor="@color/secondary"
-                        android:textSize="12sp"
+                        android:textSize="13sp"
                         app:backgroundTint="@color/secondary_surface"
-                        app:cornerRadius="14dp" />
+                        app:cornerRadius="14dp"
+                        app:minWidth="0dp" />
 
                     <com.google.android.material.button.MaterialButton
                         android:id="@+id/btnStopAudio"
                         android:layout_width="0dp"
                         android:layout_height="46dp"
                         android:layout_weight="1"
-                        android:text="@string/btn_stop_audio"
+                        android:insetLeft="0dp"
+                        android:insetRight="0dp"
+                        android:insetTop="0dp"
+                        android:insetBottom="0dp"
+                        android:minWidth="0dp"
+                        android:paddingStart="4dp"
+                        android:paddingEnd="4dp"
+                        android:letterSpacing="0"
+                        android:maxLines="1"
+                        android:text="@string/test_stop"
                         android:textColor="@color/red"
-                        android:textSize="12sp"
+                        android:textSize="13sp"
                         app:backgroundTint="@color/red_surface"
-                        app:cornerRadius="14dp" />
+                        app:cornerRadius="14dp"
+                        app:minWidth="0dp" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
