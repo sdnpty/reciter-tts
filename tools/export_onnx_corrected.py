@@ -179,7 +179,7 @@ with torch.no_grad():
             "attention_mask": {0: "batch", 1: "seq"},
             output_name: {0: "batch", 1: "seq"}
         },
-        opset_version=17,
+        opset_version=18,
         do_constant_folding=True
     )
 print(f"  Talker: {os.path.getsize(talker_path) / 1024**2:.0f} MB")
@@ -268,7 +268,7 @@ with torch.no_grad():
             "attention_mask": {0: "batch", 1: "seq"},
             cp_out_name: {0: "batch", 1: "seq"}
         },
-        opset_version=17,
+        opset_version=18,
         do_constant_folding=True
     )
 print(f"  Code Predictor: {os.path.getsize(cp_path) / 1024**2:.0f} MB")
@@ -331,7 +331,7 @@ else:
                         "codec_tokens": {0: "batch", seq_ax: "seq_len"},
                         "audio": {0: "batch", 2: "samples"}
                     },
-                    opset_version=17,
+                    opset_version=18,
                     do_constant_folding=True
                 )
             print(f"  Code2Wav: {os.path.getsize(code2wav_path) / 1024**2:.0f} MB")
@@ -369,7 +369,7 @@ if speaker_encoder is not None:
                         "mel_spectrogram": {0: "batch"},
                         "speaker_embedding": {0: "batch"}
                     },
-                    opset_version=17,
+                    opset_version=18,
                     do_constant_folding=True
                 )
             print(f"  Speaker Encoder: {os.path.getsize(se_path) / 1024**2:.0f} MB")
