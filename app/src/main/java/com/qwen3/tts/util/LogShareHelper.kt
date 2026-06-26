@@ -20,7 +20,11 @@ object LogShareHelper {
         }
     }
 
-    fun shareOrToast(context: Context, logger: TTSLogger, chooserTitle: String = "Share Logs") {
+    fun shareOrToast(
+        context: Context,
+        logger: TTSLogger,
+        chooserTitle: String = context.getString(com.qwen3.tts.R.string.share_logs_chooser)
+    ) {
         val logFile = logger.getLogFileForSharing()
         if (logFile == null) {
             android.widget.Toast.makeText(context, com.qwen3.tts.R.string.toast_no_logs, android.widget.Toast.LENGTH_SHORT).show()

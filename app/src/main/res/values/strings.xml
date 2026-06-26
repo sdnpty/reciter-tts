@@ -11,7 +11,7 @@
     <string name="sample_text_ru">Привет! Это Reciter TTS: локальный синтез речи на базе Qwen/Qwen3 для русского языка.</string>
     <string name="sample_text_en">Hello! Reciter TTS runs neural speech synthesis fully on your device.</string>
     <string name="sample_text_zh">你好！Reciter TTS 在设备上本地运行神经语音合成。</string>
-    <string name="sample_text_default">Reciter TTS — on-device neural speech synthesis.</string>
+    <string name="sample_text_default">Reciter TTS — нейросетевой синтез речи прямо на устройстве.</string>
 
     <!-- Languages -->
     <string name="lang_ru">Русский</string>
@@ -95,6 +95,9 @@
     <string name="extracting_progress">Распаковка: %1$d из %2$d файлов</string>
     <string name="error_empty_zip">Архив ZIP пуст</string>
     <string name="error_empty_url">Введите URL для скачивания моделей</string>
+    <string name="error_https_only">Разрешены только HTTPS-ссылки</string>
+    <string name="audio_playback_failed">Не удалось воспроизвести: %1$s</string>
+    <string name="share_logs_chooser">Поделиться логами</string>
 
     <!-- Logs -->
     <string name="log_empty">Логи пусты.</string>

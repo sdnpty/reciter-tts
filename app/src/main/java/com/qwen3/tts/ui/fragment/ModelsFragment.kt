@@ -297,7 +297,7 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
 
     private fun startDownload(url: String) {
         if (!url.startsWith("https://")) {
-            Toast.makeText(requireContext(), "Only HTTPS URLs are allowed", Toast.LENGTH_LONG).show()
+            Toast.makeText(requireContext(), R.string.error_https_only, Toast.LENGTH_LONG).show()
             return
         }
 
@@ -440,7 +440,7 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
             audioTrack = track
             Toast.makeText(requireContext(), description, Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {
-            Toast.makeText(requireContext(), "Playback failed: ${e.message}", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), getString(R.string.audio_playback_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
         }
     }
 
