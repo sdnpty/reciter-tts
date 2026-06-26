@@ -299,40 +299,43 @@ class QwenInferenceEngine(
             val idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(idsLong), longArrayOf(1, seqLen.toLong()))
             val maskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(mask), longArrayOf(1, seqLen.toLong()))
 
-            val results = session.run(mapOf("input_ids" to idsTensor, "attention_mask" to maskTensor))
-            val logitsRaw = results[0].value
+            // Use try-finally to guarantee tensor/result closure even if session.run() throws.
+            var bestIdx = -1
+            try {
+                val results = session.run(mapOf("input_ids" to idsTensor, "attention_mask" to maskTensor))
+                try {
+                    val logitsRaw = results[0].value
 
-            // Extract logits for the last position
-            val vocabSize: Int
-            val lastLogits: FloatArray
+                    // Extract logits for the last position
+                    val lastLogits: FloatArray = when (logitsRaw) {
+                        is Array<*> -> {
+                            @Suppress("UNCHECKED_CAST")
+                            val arr = logitsRaw as Array<Array<FloatArray>>
+                            arr[0][seqLen - 1]
+                        }
+                        else -> {
+                            Log.e(TAG, "Unexpected logits type: ${logitsRaw?.javaClass}")
+                            break
+                        }
+                    }
 
-            when (logitsRaw) {
-                is Array<*> -> {
-                    @Suppress("UNCHECKED_CAST")
-                    val arr = logitsRaw as Array<Array<FloatArray>>
-                    vocabSize = arr[0][0].size
-                    lastLogits = arr[0][seqLen - 1]
+                    // Greedy: argmax
+                    var bestVal = Float.NEGATIVE_INFINITY
+                    for (i in lastLogits.indices) {
+                        if (lastLogits[i] > bestVal) {
+                            bestVal = lastLogits[i]
+                            bestIdx = i
+                        }
+                    }
+                } finally {
+                    results.close()
                 }
-                else -> {
-                    Log.e(TAG, "Unexpected logits type: ${logitsRaw?.javaClass}")
-                    idsTensor.close(); maskTensor.close(); results.close()
-                    break
-                }
+            } finally {
+                idsTensor.close()
+                maskTensor.close()
             }
 
-            // Greedy: argmax
-            var bestIdx = 0
-            var bestVal = Float.NEGATIVE_INFINITY
-            for (i in lastLogits.indices) {
-                if (lastLogits[i] > bestVal) {
-                    bestVal = lastLogits[i]
-                    bestIdx = i
-                }
-            }
-
-            idsTensor.close()
-            maskTensor.close()
-            results.close()
+            if (bestIdx < 0) break
 
             // EOS check
             if (bestIdx == eosTokenId) break
@@ -393,53 +396,52 @@ class QwenInferenceEngine(
         val idsLong = LongArray(seqLen) { coarseCodes[it].toLong() }
         val mask = LongArray(seqLen) { 1L }
 
+        val idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(idsLong), longArrayOf(1, seqLen.toLong()))
+        val maskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(mask), longArrayOf(1, seqLen.toLong()))
         try {
-            val idsTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(idsLong), longArrayOf(1, seqLen.toLong()))
-            val maskTensor = OnnxTensor.createTensor(env, LongBuffer.wrap(mask), longArrayOf(1, seqLen.toLong()))
-
             val results = session.run(mapOf("input_ids" to idsTensor, "attention_mask" to maskTensor))
-            val output = results[0].value
+            try {
+                val output = results[0].value
 
-            if (hasLogits && output is Array<*>) {
-                @Suppress("UNCHECKED_CAST")
-                val logits = output as Array<Array<FloatArray>>
-                val outDim = logits[0][0].size
+                if (hasLogits && output is Array<*>) {
+                    @Suppress("UNCHECKED_CAST")
+                    val logits = output as Array<Array<FloatArray>>
+                    val outDim = logits[0][0].size
 
-                // If output dimension covers all quantizers (outDim ≈ CODEBOOK_SIZE * (NUM_QUANTIZERS-1))
-                val codesPerQuantizer = outDim / (NUM_QUANTIZERS - 1).coerceAtLeast(1)
+                    // If output dimension covers all quantizers (outDim ≈ CODEBOOK_SIZE * (NUM_QUANTIZERS-1))
+                    val codesPerQuantizer = outDim / (NUM_QUANTIZERS - 1).coerceAtLeast(1)
 
-                for (t in 0 until seqLen) {
-                    for (q in 1 until NUM_QUANTIZERS) {
-                        val offset = (q - 1) * codesPerQuantizer
-                        val end = min(offset + codesPerQuantizer, outDim)
-                        if (offset >= outDim) {
-                            allCodes[t * NUM_QUANTIZERS + q] = 0L
-                            continue
-                        }
-                        var bestIdx = 0
-                        var bestVal = Float.NEGATIVE_INFINITY
-                        for (i in offset until end) {
-                            if (logits[0][t][i] > bestVal) {
-                                bestVal = logits[0][t][i]
-                                bestIdx = i - offset
+                    for (t in 0 until seqLen) {
+                        for (q in 1 until NUM_QUANTIZERS) {
+                            val offset = (q - 1) * codesPerQuantizer
+                            val end = min(offset + codesPerQuantizer, outDim)
+                            if (offset >= outDim) {
+                                allCodes[t * NUM_QUANTIZERS + q] = 0L
+                                continue
                             }
+                            var bestIdx = 0
+                            var bestVal = Float.NEGATIVE_INFINITY
+                            for (i in offset until end) {
+                                if (logits[0][t][i] > bestVal) {
+                                    bestVal = logits[0][t][i]
+                                    bestIdx = i - offset
+                                }
+                            }
+                            allCodes[t * NUM_QUANTIZERS + q] = bestIdx.toLong().coerceIn(0, CODEBOOK_SIZE.toLong() - 1)
                         }
-                        allCodes[t * NUM_QUANTIZERS + q] = bestIdx.toLong().coerceIn(0, CODEBOOK_SIZE.toLong() - 1)
+                    }
+                } else {
+                    // hidden_states output — fill with zeros for fine quantizers
+                    Log.w(TAG, "CodePredictor outputs hidden_states — fine codes will be zero")
+                    for (i in 0 until numFrames) {
+                        for (q in 1 until NUM_QUANTIZERS) {
+                            allCodes[i * NUM_QUANTIZERS + q] = 0L
+                        }
                     }
                 }
-            } else {
-                // hidden_states output — fill with zeros for fine quantizers
-                Log.w(TAG, "CodePredictor outputs hidden_states — fine codes will be zero")
-                for (i in 0 until numFrames) {
-                    for (q in 1 until NUM_QUANTIZERS) {
-                        allCodes[i * NUM_QUANTIZERS + q] = 0L
-                    }
-                }
+            } finally {
+                results.close()
             }
-
-            idsTensor.close()
-            maskTensor.close()
-            results.close()
         } catch (e: Exception) {
             Log.e(TAG, "Code predictor failed, using coarse codes", e)
             for (i in 0 until numFrames) {
@@ -447,6 +449,9 @@ class QwenInferenceEngine(
                     allCodes[i * NUM_QUANTIZERS + q] = coarseCodes[i].toLong()
                 }
             }
+        } finally {
+            idsTensor.close()
+            maskTensor.close()
         }
 
         return allCodes
@@ -480,25 +485,28 @@ class QwenInferenceEngine(
 
         // Determine the input name from the session
         val inputName = session.inputNames.firstOrNull() ?: "codec_tokens"
-        val results = session.run(mapOf(inputName to codesTensor))
-
-        val audioRaw = results[0].value
-        val audio: FloatArray = when (audioRaw) {
-            is Array<*> -> {
-                @Suppress("UNCHECKED_CAST")
-                val arr = audioRaw as Array<Array<FloatArray>>
-                arr[0][0]
+        try {
+            val results = session.run(mapOf(inputName to codesTensor))
+            try {
+                val audioRaw = results[0].value
+                return when (audioRaw) {
+                    is Array<*> -> {
+                        @Suppress("UNCHECKED_CAST")
+                        val arr = audioRaw as Array<Array<FloatArray>>
+                        arr[0][0]
+                    }
+                    is FloatArray -> audioRaw
+                    else -> {
+                        Log.e(TAG, "Unexpected Code2Wav output type: ${audioRaw?.javaClass}")
+                        floatArrayOf()
+                    }
+                }
+            } finally {
+                results.close()
             }
-            is FloatArray -> audioRaw
-            else -> {
-                Log.e(TAG, "Unexpected Code2Wav output type: ${audioRaw?.javaClass}")
-                floatArrayOf()
-            }
+        } finally {
+            codesTensor.close()
         }
-
-        codesTensor.close()
-        results.close()
-        return audio
     }
 
     // ── Utilities ────────────────────────────────────────────

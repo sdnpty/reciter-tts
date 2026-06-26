@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- FileProvider paths for sharing log files and exported WAV files.
+     Exposed via ${applicationId}.fileprovider authority. -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Log file in cache dir -->
+    <cache-path name="logs" path="." />
+    <!-- Exported WAV files -->
+    <cache-path name="exports" path="exports/" />
+    <!-- Downloaded model ZIPs (temp files) -->
+    <cache-path name="cache" path="." />
+</paths>

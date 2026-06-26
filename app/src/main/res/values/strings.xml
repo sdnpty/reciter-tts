@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Reciter TTS</string>
+
+    <!-- Synthesis fragment -->
+    <string name="btn_synthesize">Synthesize</string>
+    <string name="btn_stop_audio">Stop</string>
+    <string name="hint_text">Enter text to synthesize…</string>
+    <string name="sample_text_ru">Привет! Это тестовый текст для синтеза речи.</string>
+    <string name="sample_text_en">Hello! This is a test sentence for speech synthesis.</string>
+    <string name="sample_text_zh">你好！这是语音合成测试文本。</string>
+    <string name="sample_text_default">Hello! This is a test sentence.</string>
+    <string name="status_models_present">Models loaded — ready</string>
+    <string name="status_models_missing_details">Models missing: %1$s</string>
+    <string name="status_error">Synthesis failed</string>
+    <string name="status_downloading">Downloading…</string>
+    <string name="wav_saving">Saving WAV…</string>
+    <string name="wav_failed">Failed to save WAV</string>
+    <string name="wav_share_title">Share audio</string>
+    <string name="toast_default_tts_set">Could not open TTS settings</string>
+
+    <!-- Models fragment -->
+    <string name="dialog_download_title">Download Models</string>
+    <string name="dialog_download_message">Enter the HTTPS URL of the model ZIP archive:</string>
+    <string name="dialog_download_progress">%1$d%% • %2$s / %3$s</string>
+    <string name="dialog_download_complete">Download and extraction complete!</string>
+    <string name="dialog_download_error">Download failed: %1$s</string>
+    <string name="dialog_extracting">Extracting models…</string>
+    <string name="dialog_delete_title">Delete Models</string>
+    <string name="dialog_delete_message">This will delete all downloaded model files. You will need to re-download them to use the TTS engine.</string>
+    <string name="dialog_yes">Yes</string>
+    <string name="dialog_no">No</string>
+    <string name="dialog_cancel">Cancel</string>
+    <string name="btn_delete_models">Delete Models</string>
+    <string name="error_empty_url">Please enter a URL</string>
+    <string name="extracting_progress">Extracting: %1$d / %2$d files</string>
+    <string name="toast_models_deleted">Models deleted</string>
+
+    <!-- Settings fragment -->
+    <string name="app_version_format">Version %1$s (%2$d)</string>
+    <string name="log_empty">(no log entries yet)</string>
+    <string name="toast_logs_cleared">Logs cleared</string>
+    <string name="toast_logs_copied">Logs copied to clipboard</string>
+    <string name="model_switch_hint">Restart the TTS engine in Android Settings to apply the new model</string>
+    <string name="toast_no_logs">No logs available yet</string>
+    <string name="toast_share_failed">Could not share log file</string>
+</resources>

@@ -67,6 +67,8 @@ dependencies {
     implementation("com.google.android.material:material:1.12.0")
     implementation("androidx.constraintlayout:constraintlayout:2.1.4")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.2")
+    implementation("androidx.lifecycle:lifecycle-viewmodel-ktx:2.8.2")
+    implementation("androidx.cardview:cardview:1.0.0")
     // ONNX Runtime Android — последняя стабильная в Maven Central (1.26.0)
     // Проверено: https://central.sonatype.com/artifact/com.microsoft.onnxruntime/onnxruntime-android
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")

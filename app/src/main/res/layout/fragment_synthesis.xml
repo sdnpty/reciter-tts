@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp">
+
+        <!-- Engine status -->
+        <View
+            android:id="@+id/statusIndicator"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:background="@drawable/ic_reciter_logo"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <TextView
+            android:id="@+id/tvEngineStatus"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="@string/status_models_missing_details"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toEndOf="@id/statusIndicator"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Voice chip group -->
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/chipGroupLang"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            app:singleSelection="true"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tvEngineStatus" />
+
+        <!-- Text input -->
+        <EditText
+            android:id="@+id/etInput"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_text"
+            android:minLines="4"
+            android:gravity="top"
+            android:inputType="textMultiLine"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/chipGroupLang" />
+
+        <!-- Progress -->
+        <ProgressBar
+            android:id="@+id/progressSynth"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:visibility="gone"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/etInput" />
+
+        <!-- Action buttons -->
+        <Button
+            android:id="@+id/btnSynthesize"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/btn_synthesize"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/progressSynth" />
+
+        <Button
+            android:id="@+id/btnSaveWav"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="@string/wav_share_title"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/progressSynth" />
+
+        <Button
+            android:id="@+id/btnSetDefault"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Set as Default TTS"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/btnSynthesize" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</ScrollView>

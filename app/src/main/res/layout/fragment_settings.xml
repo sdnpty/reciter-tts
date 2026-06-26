@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <androidx.constraintlayout.widget.ConstraintLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:padding="16dp">
+
+        <!-- Speaker ID slider -->
+        <com.google.android.material.slider.Slider
+            android:id="@+id/sliderSpeakerId"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:valueFrom="0"
+            android:valueTo="10"
+            android:stepSize="1"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toTopOf="parent" />
+
+        <!-- Speed slider -->
+        <com.google.android.material.slider.Slider
+            android:id="@+id/sliderSpeed"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:valueFrom="50"
+            android:valueTo="200"
+            android:stepSize="5"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/sliderSpeakerId" />
+
+        <TextView
+            android:id="@+id/tvSpeedValue"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="100%"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/sliderSpeed" />
+
+        <!-- Device chip group -->
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/chipGroupDevice"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            app:singleSelection="true"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tvSpeedValue">
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chipCpu"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="CPU"
+                style="@style/Widget.MaterialComponents.Chip.Choice" />
+
+            <com.google.android.material.chip.Chip
+                android:id="@+id/chipNnapi"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="NNAPI"
+                style="@style/Widget.MaterialComponents.Chip.Choice" />
+
+        </com.google.android.material.chip.ChipGroup>
+
+        <!-- Logging switch -->
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/switchLogging"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="Detailed logging"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/chipGroupDevice" />
+
+        <!-- Model picker -->
+        <TextView
+            android:id="@+id/tvNoModels"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:text="No models installed"
+            android:visibility="gone"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/switchLogging" />
+
+        <com.google.android.material.chip.ChipGroup
+            android:id="@+id/chipGroupModels"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            app:singleSelection="true"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/tvNoModels" />
+
+        <!-- Log buttons -->
+        <Button
+            android:id="@+id/btnShareLogs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Share Logs"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/chipGroupModels" />
+
+        <Button
+            android:id="@+id/btnClearLogs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Clear Logs"
+            app:layout_constraintStart_toEndOf="@id/btnShareLogs"
+            app:layout_constraintTop_toBottomOf="@id/chipGroupModels" />
+
+        <Button
+            android:id="@+id/btnCopyLogs"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Copy Logs"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/chipGroupModels" />
+
+        <!-- Log scroll view -->
+        <ScrollView
+            android:id="@+id/scrollLogs"
+            android:layout_width="0dp"
+            android:layout_height="200dp"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/btnShareLogs">
+
+            <TextView
+                android:id="@+id/tvLogContent"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:fontFamily="monospace"
+                android:textSize="11sp" />
+        </ScrollView>
+
+        <!-- App version -->
+        <TextView
+            android:id="@+id/tvAppVersion"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            app:layout_constraintEnd_toEndOf="parent"
+            app:layout_constraintStart_toStartOf="parent"
+            app:layout_constraintTop_toBottomOf="@id/scrollLogs" />
+
+    </androidx.constraintlayout.widget.ConstraintLayout>
+</ScrollView>
