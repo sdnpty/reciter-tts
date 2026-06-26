@@ -16,6 +16,7 @@ import androidx.appcompat.app.AlertDialog
 import androidx.fragment.app.Fragment
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
+import com.google.android.material.chip.Chip
 import com.qwen3.tts.R
 import com.qwen3.tts.databinding.FragmentModelsBinding
 import com.qwen3.tts.service.ModelDownloadService
@@ -85,6 +86,61 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
         binding.btnTestSweep.setOnClickListener { playFrequencySweep() }
         binding.btnStopAudio.setOnClickListener { stopAudio() }
     }
+
+    // chipId -> model slot id
+    private val modelChips = mutableMapOf<Int, String>()
+
+    /**
+     * Builds a chip per installed model so the user can pick which one is
+     * active right on the Models screen. The active model drives the status
+     * card below; downloading/importing an archive adds (and activates) a slot.
+     */
+    private fun setupModelPicker() {
+        val ctx = context ?: return
+        if (_binding == null) return
+        val installed = ModelConfig.installedModels(ctx)
+        binding.chipGroupModels.setOnCheckedStateChangeListener(null)
+        binding.chipGroupModels.removeAllViews()
+        modelChips.clear()
+
+        if (installed.isEmpty()) {
+            binding.tvNoModels.visibility = View.VISIBLE
+            return
+        }
+        binding.tvNoModels.visibility = View.GONE
+
+        val activeId = ModelConfig.activeModel(ctx)?.id
+        installed.forEach { model ->
+            val chip = layoutInflater.inflate(R.layout.item_voice_chip, binding.chipGroupModels, false) as Chip
+            chip.id = View.generateViewId()
+            val langs = model.profile.languages.joinToString(",")
+            val ready = isModelReady(model)
+            val name = if (langs.isBlank()) model.profile.displayName else "${model.profile.displayName} · $langs"
+            chip.text = if (ready) "✓ $name" else "⬇ $name"
+            chip.isChecked = model.id == activeId
+            binding.chipGroupModels.addView(chip)
+            modelChips[chip.id] = model.id
+        }
+
+        binding.chipGroupModels.setOnCheckedStateChangeListener { _, checkedIds ->
+            val id = checkedIds.firstOrNull()?.let { modelChips[it] } ?: return@setOnCheckedStateChangeListener
+            if (id != ModelConfig.activeModel(requireContext())?.id) {
+                ModelConfig.setActiveModel(requireContext(), id)
+                com.qwen3.tts.engine.tokenizer.Qwen3Tokenizer.reset()
+                logger.i(TAG, "Active model switched to '$id'")
+                Toast.makeText(requireContext(), R.string.model_switch_hint, Toast.LENGTH_LONG).show()
+                // Rebuild chips + status after this callback returns, so we don't
+                // mutate the ChipGroup from inside its own selection callback.
+                binding.chipGroupModels.post { refreshModelStatus() }
+            }
+        }
+    }
+
+    /** True when every required ONNX file of [model]'s profile exists in its slot dir. */
+    private fun isModelReady(model: ModelConfig.InstalledModel): Boolean =
+        model.profile.modelFiles
+            .filter { it.requiredForSynthesis }
+            .all { File(model.dir, it.filename).exists() }
 
     override fun onStart() {
         super.onStart()
@@ -193,6 +249,7 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
         binding.btnDownload.isEnabled = !allPresent
         binding.btnDeleteModels.isEnabled = totalSize > 0
 
+        setupModelPicker()
         viewModel.refreshModelStatus()
     }
 

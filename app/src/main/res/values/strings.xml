@@ -62,6 +62,8 @@
     <!-- Preferences -->
     <string name="pref_model_title">Активная модель</string>
     <string name="model_none">Модели не установлены — импортируйте на вкладке «Модели».</string>
+    <string name="model_none_here">Модели не установлены — скачайте или импортируйте архив ниже.</string>
+    <string name="label_active_model_sub">Выберите активную модель, затем загрузите в неё архив</string>
     <string name="model_switch_hint">Смена модели применится при следующей загрузке движка.</string>
     <string name="pref_category_voice">Голос</string>
     <string name="pref_category_advanced">Движок</string>
