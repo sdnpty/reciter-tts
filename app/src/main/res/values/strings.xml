@@ -52,8 +52,8 @@
     <string name="label_logs">Логи</string>
 
     <!-- Audio test -->
-    <string name="test_sine">Синус</string>
-    <string name="test_sweep">Свип</string>
+    <string name="test_sine">Тон</string>
+    <string name="test_sweep">Диапазон</string>
     <string name="test_stop">Стоп</string>
 
     <!-- Hints -->
