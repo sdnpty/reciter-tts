@@ -436,17 +436,26 @@ class ModelDownloadService : Service() {
 
     private fun acquireWakeLock() {
         if (wakeLock?.isHeld == true) return
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
-            acquire(60L * 60L * 1000L)
+        // Defensive: without the WAKE_LOCK permission acquire() throws a
+        // SecurityException that crashes the whole service start before the ZIP
+        // is even unpacked. The import works without the wake lock (just less
+        // resilient to doze), so degrade gracefully instead of crashing.
+        try {
+            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, WAKELOCK_TAG).apply {
+                acquire(60L * 60L * 1000L)
+            }
+        } catch (t: Throwable) {
+            logger.w(TAG, "Wake lock unavailable, continuing without it: ${t.message}")
+            wakeLock = null
         }
     }
 
     private fun releaseWakeLock() {
-        val lock = wakeLock
-        if (lock?.isHeld == true) {
-            lock.release()
-        }
+        try {
+            val lock = wakeLock
+            if (lock?.isHeld == true) lock.release()
+        } catch (_: Throwable) {}
         wakeLock = null
     }
 
