@@ -126,5 +126,7 @@ prefill, (5) quality tuning.
 
 - [x] text_cond table (fp16), codec_embed.onnx
 - [x] **talker_step.onnx — KV-cache single-step, eager attn, validated max|onnx-torch|=5.6e-5 at cache_len=7**
-- [ ] subtalker (code_predictor) step export
-- [ ] Kotlin AR decoder + prefill + code2wav wiring
+- [x] subtalker (code_predictor) step export + code2wav
+- [x] **End-to-end ONNX reference: AR loop matches model.generate 100% (29/29 frames bit-exact)**
+- [ ] prefill construction replication (for baked voices)
+- [ ] Kotlin AR decoder + voice baking

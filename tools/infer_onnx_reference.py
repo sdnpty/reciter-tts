@@ -143,6 +143,18 @@ def main():
         if first_bad is not None:
             print("  ref :", ref_codes[first_bad])
             print("  ours:", out[first_bad])
+
+    # close the chain: frames -> code2wav -> audio
+    try:
+        import soundfile as sf
+        c2w = ort.InferenceSession(f"{D}/code2wav.onnx", providers=["CPUExecutionProvider"])
+        codes_in = out.T[None].astype(np.int64)            # (1, 16, T)
+        audio = c2w.run(None, {"codec_tokens": codes_in})[0].reshape(-1)
+        sf.write("/content/onnx_reference.wav", audio, 24000)
+        print(f"\ncode2wav -> /content/onnx_reference.wav  ({len(audio)/24000:.2f}s)")
+        print("Compare it to /content/ref_audio.wav (should sound identical).")
+    except Exception as e:
+        print(f"code2wav step skipped: {e}")
     return out
 
 
