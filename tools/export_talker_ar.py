@@ -215,13 +215,16 @@ def export_talker_step(model):
         dyn[f"present_k_{i}"] = {0: "b", 2: "past1"}
         dyn[f"present_v_{i}"] = {0: "b", 2: "past1"}
 
-    with torch.no_grad():
-        ref = m(*args)
-    print(f"  torch step logits: {tuple(ref[0].shape)}  present_k0: {tuple(ref[1].shape)}")
-
-    path = f"{OUT}/talker_step.onnx"
-    torch.onnx.export(m, args, path, input_names=in_names, output_names=out_names,
-                      dynamic_axes=dyn, opset_version=OPSET, do_constant_folding=True)
+    # Force the MATH SDPA backend: the default flash-CPU kernel exports as
+    # aten::_scaled_dot_product_flash_attention_for_cpu, which ONNX can't lower.
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+    with sdpa_kernel(SDPBackend.MATH):
+        with torch.no_grad():
+            ref = m(*args)
+        print(f"  torch step logits: {tuple(ref[0].shape)}  present_k0: {tuple(ref[1].shape)}")
+        path = f"{OUT}/talker_step.onnx"
+        torch.onnx.export(m, args, path, input_names=in_names, output_names=out_names,
+                          dynamic_axes=dyn, opset_version=OPSET, do_constant_folding=True)
     print(f"  talker_step.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
 
     # validate at a DIFFERENT cache length (proves the cache axis is dynamic)
