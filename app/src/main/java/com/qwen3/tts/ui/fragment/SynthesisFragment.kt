@@ -68,7 +68,7 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         exportTts = newAppTts { status ->
             if (status != TextToSpeech.SUCCESS) {
                 activity?.runOnUiThread { toastWavFailed() }
-                return@TextToSpeech
+                return@newAppTts
             }
             exportTts?.language = getSelectedLocale()
             selectedVoice()?.id?.let { voiceId ->
