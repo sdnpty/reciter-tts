@@ -83,7 +83,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reciter-tts-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          # APK is renamed to reciter-tts-v<version>-debug.apk, so glob it.
+          path: app/build/outputs/apk/debug/*.apk
           retention-days: 30
 
       - name: Upload Release APK
@@ -91,7 +92,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reciter-tts-release
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          path: app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: Upload Release AAB
@@ -107,7 +108,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            app/build/outputs/apk/release/app-release-unsigned.apk
+            app/build/outputs/apk/release/*.apk
             app/build/outputs/bundle/release/app-release.aab
           generate_release_notes: true
           prerelease: false
