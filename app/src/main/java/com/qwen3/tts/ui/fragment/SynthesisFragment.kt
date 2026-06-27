@@ -1,12 +1,17 @@
 package com.qwen3.tts.ui.fragment
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.View
+import android.widget.EditText
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.fragment.app.Fragment
@@ -15,7 +20,9 @@ import com.qwen3.tts.R
 import com.google.android.material.chip.Chip
 import com.qwen3.tts.databinding.FragmentSynthesisBinding
 import com.qwen3.tts.ui.TTSViewModel
+import com.qwen3.tts.util.CustomVoiceStore
 import com.qwen3.tts.util.ModelConfig
+import com.qwen3.tts.util.VoiceRecorder
 import java.io.File
 import java.util.Locale
 
@@ -25,6 +32,15 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
     private var tts: TextToSpeech? = null
     private var exportTts: TextToSpeech? = null
     private var isSynthesizing = false
+
+    private val recorder = VoiceRecorder()
+    private var pendingClip: File? = null
+
+    private val micPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) toggleRecording()
+            else Toast.makeText(requireContext(), R.string.record_permission_needed, Toast.LENGTH_SHORT).show()
+        }
 
     /**
      * Creates a [TextToSpeech] bound to THIS app's own engine (QwenTTSEngine)
@@ -53,6 +69,67 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
 
         binding.btnSetDefault.setOnClickListener { openTtsSettings() }
         binding.btnSaveWav.setOnClickListener { saveToWav() }
+        binding.btnRecordVoice.setOnClickListener { onRecordClicked() }
+    }
+
+    // ── Mic recording → custom voice ──────────────────────────────
+
+    private fun onRecordClicked() {
+        if (recorder.isRecording) { toggleRecording(); return }
+        val granted = ContextCompat.checkSelfPermission(
+            requireContext(), Manifest.permission.RECORD_AUDIO
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) toggleRecording() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    private fun toggleRecording() {
+        if (recorder.isRecording) {
+            val seconds = recorder.stop()
+            binding.btnRecordVoice.setText(R.string.btn_record_voice)
+            if (seconds < 1.5f) {
+                pendingClip?.delete()
+                Toast.makeText(requireContext(), R.string.record_too_short, Toast.LENGTH_SHORT).show()
+            } else {
+                promptVoiceName()
+            }
+        } else {
+            val tmp = File(requireContext().cacheDir, "voice_rec_${System.currentTimeMillis()}.wav")
+            try {
+                recorder.start(tmp)
+                pendingClip = tmp
+                binding.btnRecordVoice.setText(R.string.btn_stop_record)
+                Toast.makeText(requireContext(), R.string.record_in_progress, Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), R.string.record_failed, Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    private fun promptVoiceName() {
+        val clip = pendingClip ?: return
+        val input = EditText(requireContext()).apply {
+            hint = getString(R.string.dialog_voice_name)
+            setText(getString(R.string.label_my_voices) + " " + (CustomVoiceStore.list(requireContext()).size + 1))
+        }
+        AlertDialog.Builder(requireContext())
+            .setTitle(R.string.dialog_voice_name)
+            .setView(input)
+            .setPositiveButton(R.string.dialog_save) { _, _ ->
+                val name = input.text?.toString()?.trim().orEmpty()
+                val voice = CustomVoiceStore.add(requireContext(), name, getSelectedLocale().toLanguageTag())
+                clip.copyTo(File(voice.clipPath), overwrite = true)
+                clip.delete()
+                pendingClip = null
+                setupVoiceChips()
+                Toast.makeText(
+                    requireContext(),
+                    getString(R.string.record_saved, voice.displayName), Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNegativeButton(R.string.dialog_cancel) { _, _ ->
+                clip.delete(); pendingClip = null
+            }
+            .show()
     }
 
     private fun saveToWav() {
@@ -182,7 +259,10 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         binding.chipGroupLang.removeAllViews()
         voiceChips.clear()
 
-        profile.voices.forEachIndexed { index, spec ->
+        val customVoices = CustomVoiceStore.list(requireContext()).map { it.toVoiceSpec() }
+        val allVoices = profile.voices + customVoices
+
+        allVoices.forEachIndexed { index, spec ->
             val chip = layoutInflater.inflate(
                 R.layout.item_voice_chip, binding.chipGroupLang, false
             ) as Chip
@@ -283,14 +363,16 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         super.onResume()
         viewModel.refreshModelStatus()
         setupModelPicker()
-        // Rebuild chips only if the active model's voice set changed.
+        // Rebuild chips only if the active model's voice set (or custom voices) changed.
         val current = voiceChips.values.map { it.id }.toSet()
-        val latest = ModelConfig.activeProfile(requireContext()).voices.map { it.id }.toSet()
+        val latest = (ModelConfig.activeProfile(requireContext()).voices.map { it.id } +
+            CustomVoiceStore.list(requireContext()).map { it.id }).toSet()
         if (current != latest) setupVoiceChips()
     }
 
     override fun onDestroyView() {
         super.onDestroyView()
+        recorder.cancel()
         tts?.shutdown()
         tts = null
         exportTts?.shutdown()

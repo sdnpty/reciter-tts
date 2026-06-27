@@ -111,6 +111,59 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
+        <!-- My voices card — record a reference from the mic to clone a voice -->
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="14dp"
+            app:cardBackgroundColor="@color/bg_elevated"
+            app:cardCornerRadius="24dp"
+            app:cardElevation="0dp"
+            app:strokeColor="@color/glass_border"
+            app:strokeWidth="1dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="@string/label_my_voices"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvRecordHint"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:alpha="0.8"
+                    android:text="@string/record_hint"
+                    android:textColor="@color/text_muted"
+                    android:textSize="13sp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnRecordVoice"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="14dp"
+                    android:text="@string/btn_record_voice"
+                    android:textColor="@color/text_accent"
+                    android:textSize="14sp"
+                    app:cornerRadius="16dp"
+                    app:icon="@drawable/ic_tts_24"
+                    app:iconGravity="textStart"
+                    app:iconTint="@color/text_accent"
+                    app:strokeColor="@color/glass_border"
+                    app:strokeWidth="1dp" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
         <!-- Text Input Card -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
