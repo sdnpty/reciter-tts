@@ -121,3 +121,10 @@ This is a large, multi-stage port comparable to the dedicated reference engines
 iterations. Staged delivery: (1) text_cond + codec_embed exports, (2) talker_step
 + subtalker_step with KV cache, (3) Kotlin decode loop + RoPE, (4) sampling +
 prefill, (5) quality tuning.
+
+## Status
+
+- [x] text_cond table (fp16), codec_embed.onnx
+- [x] **talker_step.onnx — KV-cache single-step, eager attn, validated max|onnx-torch|=5.6e-5 at cache_len=7**
+- [ ] subtalker (code_predictor) step export
+- [ ] Kotlin AR decoder + prefill + code2wav wiring
