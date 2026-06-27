@@ -90,6 +90,30 @@ done blind. Before each ONNX export we capture PyTorch ground truth in Colab:
 Each ONNX building block is then verified to match these tensors numerically
 before it goes to the device.
 
+## Exact talker.forward contract (captured via forward_pre_hook)
+
+Prefill (call 0): `inputs_embeds[1,T,1024]`, `attention_mask[1,T]`,
+`position_ids[1,T]`, `cache_position[T]`, `trailing_text_hidden[1,1,1024]`,
+`tts_pad_embed[1,1,1024]`, `use_cache`. Takes the prefill branch
+(generation_step=-1, no subtalker) → backbone+codec_head over the whole seq.
+
+Generate step (call 1+): `input_ids[1,1]` (current code0), `past_key_values`
+(DynamicCache), `cache_position[1]`, `position_ids[1,1]`,
+`attention_mask[1,t]` (grows), `past_hidden[1,1,1024]` (prev talker hidden,
+feeds the subtalker), `trailing_text_hidden[1,1,1024]`, `tts_pad_embed`,
+`generation_step`. Internally: codec_embed(code0) → code_predictor.generate
+(15 residual codes) → sum 16 embeds + text cond → backbone(step, KV) →
+codec_head → next code0 logits; returns past_hidden = hidden[:, -1:].
+
+## Export strategy (stage 2, lower risk)
+
+Because the prefill branch (`inputs_embeds` seq>1) reuses the model's own RoPE
+and skips the subtalker, stage 2a exports `talker_logits`:
+`inputs_embeds[1,T,1024] + attention_mask[1,T] -> logits[1,T,3072]`.
+The Kotlin loop re-runs it on a growing `inputs_embeds` (O(T^2), simple, no KV
+export) and reads `logits[:, -1]` for the next code0. KV-cache export is a
+later optimization. The subtalker (code_predictor) gets the same treatment.
+
 ## Scope note
 
 This is a large, multi-stage port comparable to the dedicated reference engines

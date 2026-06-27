@@ -80,8 +80,59 @@ def export_codec_embed(model):
           f"(num_embeddings={talker.model.codec_embedding.num_embeddings})")
 
 
+class TalkerLogits(torch.nn.Module):
+    """Prefill-mode talker: inputs_embeds[1,T,H] (+ attention_mask) -> logits[1,T,3072].
+
+    With seq>1 the talker takes the prefill branch (generation_step=-1, no
+    subtalker) and computes its own RoPE internally, so we reuse the model's
+    exact positional logic. The Kotlin decoder re-runs this on a growing
+    inputs_embeds and reads logits[:, -1] each step."""
+    def __init__(self, talker):
+        super().__init__()
+        self.talker = talker
+    def forward(self, inputs_embeds, attention_mask):
+        out = self.talker(inputs_embeds=inputs_embeds, attention_mask=attention_mask,
+                          use_cache=False, return_dict=True)
+        return out.logits
+
+
+def export_talker_logits(model):
+    talker = _talker(model)
+    m = TalkerLogits(talker).float().eval()
+    T = 8
+    dummy_emb = torch.randn(1, T, 1024)
+    dummy_mask = torch.ones(1, T, dtype=torch.long)
+    with torch.no_grad():
+        ref = m(dummy_emb, dummy_mask)
+    print(f"  torch logits: {tuple(ref.shape)}")
+    path = f"{OUT}/talker_logits.onnx"
+    torch.onnx.export(
+        m, (dummy_emb, dummy_mask), path,
+        input_names=["inputs_embeds", "attention_mask"], output_names=["logits"],
+        dynamic_axes={"inputs_embeds": {0: "b", 1: "t"},
+                      "attention_mask": {0: "b", 1: "t"},
+                      "logits": {0: "b", 1: "t"}},
+        opset_version=OPSET, do_constant_folding=True)
+    print(f"  talker_logits.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
+    # validate ONNX == torch on a fresh input
+    try:
+        import onnxruntime as ort, numpy as np
+        sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        emb2 = torch.randn(1, 10, 1024); mask2 = torch.ones(1, 10, dtype=torch.long)
+        with torch.no_grad():
+            tref = m(emb2, mask2).numpy()
+        oout = sess.run(None, {"inputs_embeds": emb2.numpy(),
+                               "attention_mask": mask2.numpy().astype(np.int64)})[0]
+        print(f"  VALIDATION max|onnx-torch| = {np.abs(oout - tref).max():.3e} "
+              f"(should be < 1e-3)")
+    except Exception as e:
+        print(f"  validation skipped: {e}")
+
+
 if __name__ == "__main__":
     print("=== Stage 1: text_cond + codec_embed ===")
     export_text_cond_table(model)   # noqa: F821  (provided by the Colab session)
     export_codec_embed(model)       # noqa: F821
-    print("Done. Next: stage 2 (talker_step / subtalker_step with KV cache).")
+    print("\n=== Stage 2a: talker_logits (prefill-mode, reuses RoPE) ===")
+    export_talker_logits(model)     # noqa: F821
+    print("\nDone. Next: subtalker (code_predictor) export + Kotlin AR loop.")
