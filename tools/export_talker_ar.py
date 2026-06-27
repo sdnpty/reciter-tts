@@ -335,6 +335,57 @@ def export_subtalker(model):
         print(f"  validation FAILED: {e}")
 
 
+# ── Stage 2d: code2wav (codec tokens -> audio) ───────────────────────────────
+
+def _find_code2wav(model):
+    """Locate the codec decoder (codes[1,16,T] -> audio) in the loaded model."""
+    roots = []
+    st = getattr(model, "speech_tokenizer", None)
+    if st is not None:
+        roots += [st, getattr(st, "model", None)]
+    roots.append(model)
+    for r in roots:
+        if r is None:
+            continue
+        for attr in ["decoder", "code2wav", "vocoder", "generator"]:
+            d = getattr(r, attr, None)
+            if d is not None and isinstance(d, torch.nn.Module):
+                return d, attr
+    return None, None
+
+
+def export_code2wav(model):
+    dec, name = _find_code2wav(model)
+    if dec is None:
+        print("  code2wav NOT found — run: print([n for n,_ in model.speech_tokenizer.named_children()])")
+        return
+    c2w = dec.float().eval()
+    dummy = (torch.arange(1 * 16 * 32, dtype=torch.long) % 2048).view(1, 16, 32)
+    try:
+        with torch.no_grad():
+            out = c2w(dummy)
+        print(f"  code2wav via .{name}: in[1,16,32] -> {tuple(out.shape) if hasattr(out,'shape') else type(out)}")
+    except Exception as e:
+        print(f"  code2wav forward failed ({e}); share model.speech_tokenizer children")
+        return
+    path = f"{OUT}/code2wav.onnx"
+    torch.onnx.export(c2w, (dummy,), path, input_names=["codec_tokens"], output_names=["audio"],
+                      dynamic_axes={"codec_tokens": {0: "b", 2: "t"}, "audio": {0: "b", 2: "n"}},
+                      opset_version=OPSET, do_constant_folding=True)
+    print(f"  code2wav.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
+
+
+def write_manifest():
+    import json
+    files = sorted(os.listdir(OUT))
+    info = {f: os.path.getsize(os.path.join(OUT, f)) for f in files}
+    with open(f"{OUT}/build_manifest.json", "w") as fp:
+        json.dump(info, fp, indent=2)
+    print("\n=== Output files ===")
+    for f in files:
+        print(f"  {f:34s} {info[f]/1024**2:8.1f} MB")
+
+
 if __name__ == "__main__":
     print("=== Stage 1: text_cond + codec_embed ===")
     export_text_cond_table(model)   # noqa: F821  (provided by the Colab session)
@@ -343,4 +394,7 @@ if __name__ == "__main__":
     export_talker_step(model)       # noqa: F821
     print("\n=== Stage 2c: subtalker (code_predictor) ===")
     export_subtalker(model)         # noqa: F821
-    print("\nDone. Next: Kotlin AR decoder + prefill + code2wav wiring.")
+    print("\n=== Stage 2d: code2wav ===")
+    export_code2wav(model)          # noqa: F821
+    write_manifest()
+    print("\nDone. Full ONNX model set built. Next: bake voices + Kotlin decoder.")
