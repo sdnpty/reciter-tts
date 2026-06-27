@@ -244,7 +244,7 @@ class QwenTTSEngine : TextToSpeechService() {
         val voiceName = request.voiceName
             ?: profile().voiceForLanguage(request.language ?: "")?.id
             ?: profile().defaultVoice()?.id
-            ?: "qwen3_ru"
+            ?: "ru_male_1"
 
         Log.d(TAG, "Synthesize: text=${text.take(50)}, pitch=$pitch, speed=$speed, voice=$voiceName")
         logger.i(TAG, "Synthesis requested: ${text.take(50)}")

@@ -86,25 +86,32 @@ object ModelConfig {
     // ── Bundled fallback profile (Qwen3-TTS 0.6B) ────────────────
 
     val QWEN3_TTS_12HZ_06B = ModelProfile(
-        id = "qwen3-tts-12hz-0.6b",
-        displayName = "Qwen3 TTS 12Hz 0.6B",
+        id = "qwen3-tts-ar",
+        displayName = "Qwen3 TTS 0.6B (AR)",
         family = "qwen3-tts",
-        architecture = "qwen3-codec",
+        architecture = "qwen3-codec-ar",
         sampleRateHz = 24_000,
         codecFrameRateHz = 12,
         audioTokenStart = 151_936,
         eosTokenId = 151_645,
+        // New autoregressive file set (see tools/export_talker_ar.py / docs/PIPELINE.md).
+        // The raw fp16 tables + baked voices + configs travel as "tokenizer" files
+        // so they are presence-checked alongside the ONNX graphs.
         modelFiles = listOf(
-            ModelFile("talker_base_android.onnx", 428L, Role.TALKER),
-            ModelFile("code_predictor_base_android.onnx", 77L, Role.CODE_PREDICTOR, requiredForSynthesis = false),
-            ModelFile("code2wav_android.onnx", 210L, Role.VOCODER),
-            ModelFile("speaker_encoder_android.onnx", 9L, Role.SPEAKER_ENCODER, requiredForSynthesis = false)
+            ModelFile("talker_step.onnx", 430L, Role.TALKER),
+            ModelFile("subtalker_step.onnx", 80L, Role.CODE_PREDICTOR),
+            ModelFile("codec_embed.onnx", 12L, Role.SPEECH_TOKENIZER),
+            ModelFile("code2wav.onnx", 210L, Role.VOCODER),
+            ModelFile("speaker_encoder.onnx", 10L, Role.SPEAKER_ENCODER, requiredForSynthesis = false)
         ),
-        tokenizerFiles = listOf("vocab.json", "merges.txt"),
+        tokenizerFiles = listOf(
+            "vocab.json", "merges.txt", "text_cond_table.f16",
+            "subtalker_codec_embed.f16", "subtalker_heads.f16",
+            "baked_voices.bin", "voices.json", "ar_config.json"
+        ),
         voices = listOf(
-            VoiceSpec("qwen3_ru", "ru-RU", "Русский", speakerId = 0),
-            VoiceSpec("qwen3_en", "en-US", "English", speakerId = 1),
-            VoiceSpec("qwen3_zh", "zh-CN", "中文", speakerId = 2)
+            VoiceSpec("ru_male_1", "ru-RU", "Русский (муж.)", speakerId = 0),
+            VoiceSpec("ru_female_1", "ru-RU", "Русский (жен.)", speakerId = 1)
         )
     )
 

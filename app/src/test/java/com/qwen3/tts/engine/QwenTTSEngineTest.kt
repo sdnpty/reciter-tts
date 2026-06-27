@@ -59,21 +59,17 @@ class QwenTTSEngineTest {
     }
 
     @Test
-    fun `English language is available`() {
+    fun `English not supported in Russian-only fallback`() {
+        // The bundled AR model ships Russian voices (FLEURS); other languages
+        // become available only when a model declaring them is installed.
         val result = isLanguageAvailable.invoke(engine, "en", "", "") as Int
-        assertTrue(result >= 0)
+        assertEquals(-2, result)
     }
 
     @Test
-    fun `English with country is country-available`() {
-        val result = isLanguageAvailable.invoke(engine, "en", "US", "") as Int
-        assertEquals(1, result)
-    }
-
-    @Test
-    fun `Chinese language is available`() {
+    fun `Chinese not supported in Russian-only fallback`() {
         val result = isLanguageAvailable.invoke(engine, "zh", "", "") as Int
-        assertTrue(result >= 0)
+        assertEquals(-2, result)
     }
 
     @Test
@@ -97,21 +93,21 @@ class QwenTTSEngineTest {
     // --- onIsValidVoiceName tests ---
 
     @Test
-    fun `qwen3_ru is valid voice`() {
-        val result = isValidVoiceName.invoke(engine, "qwen3_ru") as Int
+    fun `ru_male_1 is valid voice`() {
+        val result = isValidVoiceName.invoke(engine, "ru_male_1") as Int
         assertEquals(1, result)
     }
 
     @Test
-    fun `qwen3_en is valid voice`() {
-        val result = isValidVoiceName.invoke(engine, "qwen3_en") as Int
+    fun `ru_female_1 is valid voice`() {
+        val result = isValidVoiceName.invoke(engine, "ru_female_1") as Int
         assertEquals(1, result)
     }
 
     @Test
-    fun `qwen3_zh is valid voice`() {
+    fun `legacy qwen3_zh is no longer a valid voice`() {
         val result = isValidVoiceName.invoke(engine, "qwen3_zh") as Int
-        assertEquals(1, result)
+        assertEquals(-2, result)
     }
 
     @Test
@@ -153,8 +149,8 @@ class QwenTTSEngineTest {
 
     @Test
     fun `onLoadVoice returns same as onIsValidVoiceName`() {
-        val valid = isValidVoiceName.invoke(engine, "qwen3_ru") as Int
-        val loaded = loadVoice.invoke(engine, "qwen3_ru") as Int
+        val valid = isValidVoiceName.invoke(engine, "ru_male_1") as Int
+        val loaded = loadVoice.invoke(engine, "ru_male_1") as Int
         assertEquals(valid, loaded)
     }
 

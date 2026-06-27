@@ -126,6 +126,6 @@
     <string name="dialog_voice_name">Имя голоса</string>
     <string name="dialog_save">Сохранить</string>
     <string name="label_install_models">Установка моделей</string>
-    <string name="card_models_hint">Архив ~724 МБ с 4 ONNX-файлами. Рекомендуется Wi-Fi.</string>
+    <string name="card_models_hint">Архив ~700 МБ (ONNX + таблицы + русские голоса). Рекомендуется Wi-Fi.</string>
     <string name="engine_provider_hint">NNAPI может ускорить синтез, но на части устройств приводит к сбоям — при проблемах оставьте CPU.</string>
 </resources>
