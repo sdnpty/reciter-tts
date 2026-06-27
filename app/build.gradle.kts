@@ -7,6 +7,15 @@ android {
     namespace = "com.qwen3.tts"
     compileSdk = 34
 
+    // Name built APKs with the version, e.g. reciter-tts-v1.0.1-release.apk
+    applicationVariants.all {
+        val variant = this
+        outputs.all {
+            (this as com.android.build.gradle.internal.api.BaseVariantOutputImpl)
+                .outputFileName = "reciter-tts-v${variant.versionName}-${variant.name}.apk"
+        }
+    }
+
     buildFeatures {
         viewBinding = true
         buildConfig = true
@@ -16,8 +25,9 @@ android {
         applicationId = "com.qwen3.tts"
         minSdk = 27
         targetSdk = 34
-        versionCode = 16
-        versionName = "2.2.0"
+        // Bump patch (and versionCode) on every commit: 1.0.1 -> 1.0.2 -> ...
+        versionCode = 10001
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

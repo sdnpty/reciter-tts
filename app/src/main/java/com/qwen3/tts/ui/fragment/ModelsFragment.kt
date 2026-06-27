@@ -337,7 +337,14 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
         downloadService?.onProgress = { percent, downloaded, total, _ ->
             activity?.runOnUiThread {
                 if (_binding == null) return@runOnUiThread
+                binding.cardProgress.visibility = View.VISIBLE
+                binding.progressBar.isIndeterminate = false
                 binding.progressBar.progress = percent
+                // Keep the title live too ("Импорт моделей… X / 7") — previously it
+                // only refreshed on tab switch, so the count looked frozen.
+                downloadService?.currentTitle?.takeIf { it.isNotEmpty() }?.let {
+                    binding.tvProgressTitle.text = it
+                }
                 binding.tvDownloadStatus.text = if (isLocalImport) {
                     getString(R.string.extracting_progress, downloaded.toInt(), total.toInt())
                 } else {
