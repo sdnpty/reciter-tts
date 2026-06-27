@@ -41,7 +41,6 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
         val prefs = requireContext().getSharedPreferences("qwen3_tts_prefs", Context.MODE_PRIVATE)
 
         // Load saved values
-        binding.sliderSpeakerId.value = prefs.getInt("speaker_id", 0).toFloat()
         binding.sliderSpeed.value = prefs.getInt("speed", 100).toFloat()
         binding.switchLogging.isChecked = prefs.getBoolean("detailed_logging", true)
 
@@ -53,11 +52,6 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
         }
 
         // Listeners
-        binding.sliderSpeakerId.addOnChangeListener { _, value, _ ->
-            prefs.edit().putInt("speaker_id", value.toInt()).apply()
-            logger.i(TAG, "Speaker ID: ${value.toInt()}")
-        }
-
         binding.sliderSpeed.addOnChangeListener { _, value, _ ->
             prefs.edit().putInt("speed", value.toInt()).apply()
             binding.tvSpeedValue.text = "${value.toInt()}%"

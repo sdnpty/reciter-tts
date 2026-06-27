@@ -3,7 +3,11 @@ package com.qwen3.tts.engine.inference
 import ai.onnxruntime.OnnxTensor
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
+import android.content.Context
 import android.util.Log
+import com.qwen3.tts.engine.tokenizer.Qwen3Tokenizer
+import com.qwen3.tts.util.AudioHelper
+import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
 import java.nio.ByteBuffer
@@ -26,9 +30,67 @@ class QwenArEngine(
     modelDir: File,
     private val inputIdsFor: (String) -> IntArray,
     private val voices: Map<String, FloatArray>,   // name -> float32[1024]
-) {
+) : SpeechSynthesizer {
     companion object {
         private const val TAG = "QwenAr"
+
+        /**
+         * Builds an AR engine for an installed model directory. Loads the baked
+         * voice x-vectors (`baked_voices.bin` + `voices.json`) and wires the
+         * tokenizer (`role + encodeForTTS(text) + suffix` from `ar_config.json`).
+         * Returns null if the required AR files are missing.
+         */
+        fun create(context: Context, modelDir: File): QwenArEngine? {
+            val required = listOf("talker_step.onnx", "subtalker_step.onnx",
+                "codec_embed.onnx", "code2wav.onnx", "text_cond_table.f16",
+                "subtalker_codec_embed.f16", "subtalker_heads.f16")
+            if (required.any { !File(modelDir, it).exists() }) {
+                Log.e(TAG, "AR model files missing in ${modelDir.name}")
+                return null
+            }
+
+            val voices = loadVoices(modelDir)
+            val cfg = runCatching { JSONObject(File(modelDir, "ar_config.json").readText()) }
+                .getOrNull()
+            val role = cfg?.optJSONArray("role_tokens").toIntList(intArrayOf(151644, 77091, 198))
+            val suffix = cfg?.optJSONArray("suffix_tokens")
+                .toIntList(intArrayOf(151645, 198, 151644, 77091, 198))
+            val tokenizer = Qwen3Tokenizer.getInstance(context)
+
+            val inputIdsFor: (String) -> IntArray = { text ->
+                (role.toList() + tokenizer.encodeForTTS(text).toList() + suffix.toList())
+                    .toIntArray()
+            }
+            return QwenArEngine(modelDir, inputIdsFor, voices)
+        }
+
+        /** Reads concatenated float32[1024] x-vectors + their names. */
+        private fun loadVoices(modelDir: File): Map<String, FloatArray> {
+            val bin = File(modelDir, "baked_voices.bin")
+            val namesJson = File(modelDir, "voices.json")
+            if (!bin.exists() || !namesJson.exists()) return emptyMap()
+            val names = runCatching {
+                val arr = JSONObject(namesJson.readText()).optJSONArray("voices")
+                (0 until (arr?.length() ?: 0)).map { arr!!.getString(it) }
+            }.getOrDefault(emptyList())
+            if (names.isEmpty()) return emptyMap()
+            val raw = bin.readBytes()
+            val fb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+            val out = LinkedHashMap<String, FloatArray>()
+            for ((i, name) in names.withIndex()) {
+                val v = FloatArray(H)
+                val start = i * H
+                if (start + H > fb.limit()) break
+                for (d in 0 until H) v[d] = fb.get(start + d)
+                out[name] = v
+            }
+            return out
+        }
+
+        private fun org.json.JSONArray?.toIntList(fallback: IntArray): IntArray {
+            if (this == null) return fallback
+            return IntArray(length()) { getInt(it) }
+        }
         const val H = 1024
         const val TALKER_LAYERS = 28
         const val SUB_LAYERS = 5
@@ -193,7 +255,29 @@ class QwenArEngine(
     }
 
     // ── public ───────────────────────────────────────────────
-    fun synthesize(text: String, voiceName: String): FloatArray {
+    override val sampleRateHz: Int = SR
+
+    override fun isReady(): Boolean = voices.isNotEmpty()
+
+    override fun synthesize(
+        text: String,
+        voiceName: String,
+        speed: Int,
+        onAudioChunk: (ByteArray?) -> Boolean
+    ) {
+        try {
+            var pcm = synthesizePcm(text, voiceName)
+            if (speed != 100) {
+                pcm = AudioHelper.timeStretch(pcm, speed / 100f, SR)
+            }
+            onAudioChunk(AudioHelper.floatToPcm16(pcm))
+        } catch (e: Throwable) {
+            Log.e(TAG, "AR synthesis failed: ${e.message}", e)
+            onAudioChunk(null)
+        }
+    }
+
+    private fun synthesizePcm(text: String, voiceName: String): FloatArray {
         val xvec = voices[voiceName] ?: voices.values.firstOrNull() ?: error("no voices")
         val ids = inputIdsFor(text)
         val (prefill, trailing) = buildPrefill(ids, xvec)
@@ -248,7 +332,7 @@ class QwenArEngine(
         return audio
     }
 
-    fun release() {
+    override fun release() {
         listOf(talker, sub, cemb, c2w).forEach { runCatching { it.close() } }
         runCatching { textCond.close() }
     }
