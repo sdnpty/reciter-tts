@@ -372,11 +372,14 @@ class QwenArEngine(
         val ids = inputIdsFor(text)
         val (prefill, trailing) = buildPrefill(ids, xvec)
 
+        val tPrefill0 = System.currentTimeMillis()
         var kv = emptyKv(TALKER_LAYERS)
         var logits = FloatArray(VOCAB); var hidden = FloatArray(H)
         for ((i, e) in prefill.withIndex()) {
             val (lg, hd, nk) = talkerStep(e, i, kv); logits = lg; hidden = hd; kv = nk
         }
+        Log.i(TAG, "prefill (${prefill.size} steps) done in ${System.currentTimeMillis() - tPrefill0} ms")
+        val tLoop0 = System.currentTimeMillis()
         val history = HashSet<Int>()
         var code0 = selectCode0(logits, history)
         var pastHidden = hidden
@@ -408,9 +411,17 @@ class QwenArEngine(
             s = add(s, if (step < trailing.size) trailing[step] else textCondRow(TTS_PAD))
             val (lg, hd, nk) = talkerStep(s, pos, kv); logits = lg; hidden = hd; kv = nk
             code0 = selectCode0(logits, history); pastHidden = hidden; pos++; step++
+            if (frames.size % 12 == 0) {
+                val el = System.currentTimeMillis() - tLoop0
+                Log.i(TAG, "frames=${frames.size}  ${el}ms  ${"%.1f".format(el.toFloat() / frames.size)} ms/frame")
+            }
         }
         kv.forEach { it.close() }
-        Log.i(TAG, "generated ${frames.size} frames")
+        val loopMs = System.currentTimeMillis() - tLoop0
+        val audioSec = frames.size / 12f
+        Log.i(TAG, "generated ${frames.size} frames in ${loopMs}ms " +
+            "(${"%.1f".format(loopMs / frames.size.coerceAtLeast(1).toFloat())} ms/frame, " +
+            "audio=${"%.2f".format(audioSec)}s, RTF=${"%.2f".format(loopMs / 1000f / audioSec.coerceAtLeast(0.01f))})")
         return if (frames.isEmpty()) FloatArray(0) else code2wav(frames)
     }
 
