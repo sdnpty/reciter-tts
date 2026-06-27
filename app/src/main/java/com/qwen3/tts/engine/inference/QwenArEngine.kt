@@ -109,7 +109,12 @@ class QwenArEngine(
         const val CODEBOOK0 = 2048
         const val VOCAB = 3072
         const val SR = 24000
-        const val REP_PENALTY = 1.05f
+        // Talker (code0) decoding. Greedy argmax collapses into a repeating
+        // token loop and never emits EOS, so we sample like the reference model.
+        const val REP_PENALTY = 1.35f
+        const val TEMPERATURE = 0.9f
+        const val TOP_K = 50
+        const val TOP_P = 0.9f
         // token ids
         const val TTS_BOS = 151672; const val TTS_EOS = 151673; const val TTS_PAD = 151671
         const val C_PAD = 2148; const val C_BOS = 2149
@@ -282,12 +287,53 @@ class QwenArEngine(
         return out
     }
 
-    private fun selectCode0(logits: FloatArray, history: Set<Int>): Int {
-        for (c in history) logits[c] = if (logits[c] > 0) logits[c] / REP_PENALTY else logits[c] * REP_PENALTY
-        for (i in CODEBOOK0 until VOCAB) if (i != EOS) logits[i] = Float.NEGATIVE_INFINITY
-        var best = 0; var bv = Float.NEGATIVE_INFINITY
-        for (i in logits.indices) if (logits[i] > bv) { bv = logits[i]; best = i }
-        return best
+    private val rng = java.util.Random()
+
+    /**
+     * Picks the next talker token (codebook-0 id, or EOS) by temperature /
+     * top-k / top-p sampling with a count-scaled repetition penalty. Greedy
+     * argmax here makes the codec LM stick on one token forever (never EOS),
+     * so this mirrors the reference model's stochastic decoding. [counts] holds
+     * how many times each id was already emitted, so loops are progressively
+     * discouraged.
+     */
+    private fun selectCode0(logits: FloatArray, counts: Map<Int, Int>): Int {
+        // Candidate space: codebook-0 [0,2048) plus EOS. Everything else masked.
+        val m = CODEBOOK0 + 1
+        val ids = IntArray(m) { if (it < CODEBOOK0) it else EOS }
+        val sc = FloatArray(m)
+        for (j in 0 until m) {
+            var v = logits[ids[j]]
+            val c = counts[ids[j]] ?: 0
+            if (c > 0) {
+                val p = Math.pow(REP_PENALTY.toDouble(), c.toDouble()).toFloat()
+                v = if (v > 0) v / p else v * p
+            }
+            sc[j] = v / TEMPERATURE
+        }
+        // Top-k: indices of the k highest scores.
+        val order = (0 until m).sortedByDescending { sc[it] }
+        val k = minOf(TOP_K, m)
+        val top = order.subList(0, k)
+        // Softmax over the top-k.
+        val maxv = sc[top[0]]
+        val exps = DoubleArray(k) { Math.exp((sc[top[it]] - maxv).toDouble()) }
+        val sum = exps.sum()
+        // Top-p (nucleus): keep the smallest prefix whose mass ≥ TOP_P.
+        var cum = 0.0; var cut = k
+        for (i in 0 until k) {
+            cum += exps[i] / sum
+            if (cum >= TOP_P) { cut = i + 1; break }
+        }
+        var massSum = 0.0
+        for (i in 0 until cut) massSum += exps[i]
+        val r = rng.nextDouble() * massSum
+        var acc = 0.0
+        for (i in 0 until cut) {
+            acc += exps[i]
+            if (r <= acc) return ids[top[i]]
+        }
+        return ids[top[cut - 1]]
     }
 
     // ── prefill ──────────────────────────────────────────────
@@ -396,8 +442,8 @@ class QwenArEngine(
         }
         log("prefill ${prefill.size} steps in ${System.currentTimeMillis() - tPrefill0} ms; decoding…")
         val tLoop0 = System.currentTimeMillis()
-        val history = HashSet<Int>()
-        var code0 = selectCode0(logits, history)
+        val counts = HashMap<Int, Int>()
+        var code0 = selectCode0(logits, counts)
         var pastHidden = hidden
         var pos = prefill.size; var step = 0
         val frames = ArrayList<IntArray>()
@@ -420,13 +466,13 @@ class QwenArEngine(
             }
             skv.forEach { it.close() }
             frames += IntArray(16).also { it[0] = code0; for (g in 0 until GROUPS) it[g + 1] = res[g] }
-            history += code0
+            counts[code0] = (counts[code0] ?: 0) + 1
             // next talker input
             var s = lastId
             for (g in 0 until GROUPS) s = add(s, subEmbRow(g, res[g]))
             s = add(s, if (step < trailing.size) trailing[step] else textCondRow(TTS_PAD))
             val (lg, hd, nk) = talkerStep(s, pos, kv); logits = lg; hidden = hd; kv = nk
-            code0 = selectCode0(logits, history); pastHidden = hidden; pos++; step++
+            code0 = selectCode0(logits, counts); pastHidden = hidden; pos++; step++
             if (frames.size % 4 == 0) {
                 val el = System.currentTimeMillis() - tLoop0
                 log("frames=${frames.size} code0=$code0  ${"%.0f".format(el.toFloat() / frames.size)} ms/frame")
