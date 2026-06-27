@@ -380,6 +380,48 @@ def export_code2wav(model):
     print(f"  code2wav.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
 
 
+# ── Android optimization: INT8 dynamic quantization ──────────────────────────
+# The unquantized set is ~1.7 GB (talker_step alone is ~1.7 GB fp32). Dynamic
+# INT8 quantization of the weight-heavy graphs shrinks them ~4x with negligible
+# quality loss for an AR codec model (activations stay fp32, only weights are
+# int8). per_channel keeps accuracy high on the big talker matmuls.
+
+def quantize_for_android():
+    """Quantize the three weight-heavy ONNX graphs to INT8 in place.
+    talker_step ~1.7 GB -> ~430 MB, subtalker_step -> ~80 MB, code2wav -> ~210 MB.
+    The tiny codec_embed.onnx and the raw fp16 tables are left as-is."""
+    try:
+        from onnxruntime.quantization import quantize_dynamic, QuantType
+    except Exception as e:
+        print(f"  quantization SKIPPED (onnxruntime.quantization unavailable: {e})")
+        return
+    # (filename, per_channel) — per_channel helps the big talker matmuls most.
+    targets = [
+        ("talker_step.onnx", True),
+        ("subtalker_step.onnx", True),
+        ("code2wav.onnx", False),
+    ]
+    print("\n=== Android optimization: INT8 dynamic quantization ===")
+    for fname, per_channel in targets:
+        src = os.path.join(OUT, fname)
+        if not os.path.exists(src):
+            print(f"  {fname}: missing, skipped")
+            continue
+        before = os.path.getsize(src) / 1024**2
+        tmp = src + ".int8.onnx"
+        try:
+            quantize_dynamic(src, tmp, weight_type=QuantType.QInt8,
+                             per_channel=per_channel)
+            os.replace(tmp, src)
+            after = os.path.getsize(src) / 1024**2
+            print(f"  {fname:24s} {before:8.1f} MB -> {after:8.1f} MB "
+                  f"(per_channel={per_channel})")
+        except Exception as e:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+            print(f"  {fname}: quantization FAILED ({e}); kept fp32")
+
+
 def write_manifest():
     import json
     files = sorted(os.listdir(OUT))
@@ -401,5 +443,6 @@ if __name__ == "__main__":
     export_subtalker(model)         # noqa: F821
     print("\n=== Stage 2d: code2wav ===")
     export_code2wav(model)          # noqa: F821
+    quantize_for_android()
     write_manifest()
-    print("\nDone. Full ONNX model set built. Next: bake voices + Kotlin decoder.")
+    print("\nDone. Full ONNX model set built (INT8). Next: bake voices + Kotlin decoder.")
