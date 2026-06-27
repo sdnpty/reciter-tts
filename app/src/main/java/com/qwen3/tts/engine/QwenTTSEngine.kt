@@ -111,7 +111,7 @@ class QwenTTSEngine : TextToSpeechService() {
     private fun buildArEngine(useNnapi: Boolean): SpeechSynthesizer? =
         com.qwen3.tts.engine.inference.QwenArEngine.create(
             this, ModelConfig.activeModelDir(this), useNnapi
-        )
+        )?.also { it.onLog = { m -> logger.i("QwenAr", m) } }
 
     private fun buildQwenEngine(profile: ModelConfig.ModelProfile, useNnapi: Boolean): SpeechSynthesizer {
         val byRole = profile.modelFiles.associateBy { it.role }

@@ -115,11 +115,15 @@ class QwenArEngine(
         const val C_PAD = 2148; const val C_BOS = 2149
         const val C_THINK = 2154; const val C_THINK_BOS = 2156; const val C_THINK_EOS = 2157
         const val LANG_RU = 2069
-        const val MAX_FRAMES = 1500
+        const val MAX_FRAMES = 360   // ~30s cap; if hit, EOS was never produced
         const val MAX_CHUNK_CHARS = 240   // cap per synthesis unit (latency/memory bound)
     }
 
     private val env = OrtEnvironment.getEnvironment()
+
+    /** Optional sink so decode progress reaches the in-app log (not just logcat). */
+    @Volatile var onLog: ((String) -> Unit)? = null
+    private fun log(m: String) { Log.i(TAG, m); onLog?.invoke(m) }
 
     private fun baseOpts() = OrtSession.SessionOptions().apply {
         setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
@@ -390,7 +394,7 @@ class QwenArEngine(
         for ((i, e) in prefill.withIndex()) {
             val (lg, hd, nk) = talkerStep(e, i, kv); logits = lg; hidden = hd; kv = nk
         }
-        Log.i(TAG, "prefill (${prefill.size} steps) done in ${System.currentTimeMillis() - tPrefill0} ms")
+        log("prefill ${prefill.size} steps in ${System.currentTimeMillis() - tPrefill0} ms; decoding…")
         val tLoop0 = System.currentTimeMillis()
         val history = HashSet<Int>()
         var code0 = selectCode0(logits, history)
@@ -423,17 +427,18 @@ class QwenArEngine(
             s = add(s, if (step < trailing.size) trailing[step] else textCondRow(TTS_PAD))
             val (lg, hd, nk) = talkerStep(s, pos, kv); logits = lg; hidden = hd; kv = nk
             code0 = selectCode0(logits, history); pastHidden = hidden; pos++; step++
-            if (frames.size % 12 == 0) {
+            if (frames.size % 4 == 0) {
                 val el = System.currentTimeMillis() - tLoop0
-                Log.i(TAG, "frames=${frames.size}  ${el}ms  ${"%.1f".format(el.toFloat() / frames.size)} ms/frame")
+                log("frames=${frames.size} code0=$code0  ${"%.0f".format(el.toFloat() / frames.size)} ms/frame")
             }
         }
         kv.forEach { it.close() }
         val loopMs = System.currentTimeMillis() - tLoop0
         val audioSec = frames.size / 12f
-        Log.i(TAG, "generated ${frames.size} frames in ${loopMs}ms " +
-            "(${"%.1f".format(loopMs / frames.size.coerceAtLeast(1).toFloat())} ms/frame, " +
-            "audio=${"%.2f".format(audioSec)}s, RTF=${"%.2f".format(loopMs / 1000f / audioSec.coerceAtLeast(0.01f))})")
+        val stop = if (code0 == EOS) "EOS" else "MAX_FRAMES (no EOS!)"
+        log("decoded ${frames.size} frames ($stop) in ${loopMs}ms, " +
+            "${"%.0f".format(loopMs / frames.size.coerceAtLeast(1).toFloat())} ms/frame, " +
+            "audio=${"%.2f".format(audioSec)}s, RTF=${"%.1f".format(loopMs / 1000f / audioSec.coerceAtLeast(0.01f))}")
         return if (frames.isEmpty()) FloatArray(0) else code2wav(frames)
     }
 
