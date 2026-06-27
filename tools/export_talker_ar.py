@@ -30,13 +30,22 @@ def _talker(model):
 
 class TextCond(torch.nn.Module):
     """text ids -> text_projection(text_embedding(ids)). Matches how generate()
-    builds trailing_text_hidden and the tts_bos/eos/pad embeds."""
+    builds trailing_text_hidden and the tts_bos/eos/pad embeds.
+
+    The raw text_embedding (151936 x H) plus the projection blows past the 2 GiB
+    protobuf limit during export. Since cond = projection(embedding(id)) is a
+    pure lookup, we PRE-COMPUTE the combined table projection(embedding.weight)
+    once and export it as a single Embedding — mathematically identical, and a
+    single 151936 x H_out table stays under 2 GiB.
+    """
     def __init__(self, talker):
         super().__init__()
-        self.text_embedding = talker.model.text_embedding   # Embedding(151936, H)
-        self.text_projection = talker.text_projection
+        with torch.no_grad():
+            w = talker.model.text_embedding.weight.float()        # [V, H_in]
+            combined = talker.text_projection(w)                  # [V, H_out]
+        self.table = torch.nn.Embedding.from_pretrained(combined.contiguous())
     def forward(self, text_ids):
-        return self.text_projection(self.text_embedding(text_ids))
+        return self.table(text_ids)
 
 
 class CodecEmbed(torch.nn.Module):
