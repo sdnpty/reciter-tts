@@ -43,6 +43,7 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         super.onViewCreated(view, savedInstanceState)
         _binding = FragmentSynthesisBinding.bind(view)
 
+        setupModelPicker()
         setupVoiceChips()
         observeModelStatus()
 
@@ -130,6 +131,47 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         binding.statusIndicator.backgroundTintList = android.content.res.ColorStateList.valueOf(
             ContextCompat.getColor(requireContext(), colorRes)
         )
+    }
+
+    // chipId -> installed model id, for the model selector.
+    private val modelChips = mutableMapOf<Int, String>()
+
+    /**
+     * Builds the model-selector chip row from every installed model so the user
+     * can switch the active model right on the Synthesis tab (not only on the
+     * Models tab). Hidden when fewer than two models are installed.
+     */
+    private fun setupModelPicker() {
+        val models = ModelConfig.installedModels(requireContext())
+        val activeId = ModelConfig.activeModel(requireContext())?.id
+        binding.chipGroupModel.removeAllViews()
+        modelChips.clear()
+
+        if (models.size < 2) {
+            binding.cardModelPicker.visibility = View.GONE
+            return
+        }
+        binding.cardModelPicker.visibility = View.VISIBLE
+
+        models.forEach { m ->
+            val chip = layoutInflater.inflate(
+                R.layout.item_voice_chip, binding.chipGroupModel, false
+            ) as Chip
+            chip.id = View.generateViewId()
+            val ready = if (m.synthesisReady()) "✓ " else "⬇ "
+            chip.text = ready + m.profile.displayName
+            chip.isChecked = m.id == activeId
+            binding.chipGroupModel.addView(chip)
+            modelChips[chip.id] = m.id
+        }
+
+        binding.chipGroupModel.setOnCheckedStateChangeListener { _, checkedIds ->
+            val id = checkedIds.firstOrNull()?.let { modelChips[it] } ?: return@setOnCheckedStateChangeListener
+            if (id == ModelConfig.activeModel(requireContext())?.id) return@setOnCheckedStateChangeListener
+            ModelConfig.setActiveModel(requireContext(), id)
+            setupVoiceChips()
+            viewModel.refreshModelStatus()
+        }
     }
 
     // chipId -> VoiceSpec, rebuilt from the active model profile/manifest.
@@ -240,6 +282,7 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
     override fun onResume() {
         super.onResume()
         viewModel.refreshModelStatus()
+        setupModelPicker()
         // Rebuild chips only if the active model's voice set changed.
         val current = voiceChips.values.map { it.id }.toSet()
         val latest = ModelConfig.activeProfile(requireContext()).voices.map { it.id }.toSet()

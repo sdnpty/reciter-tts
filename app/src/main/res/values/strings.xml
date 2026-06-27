@@ -107,10 +107,12 @@
 
     <!-- Hero / headers -->
     <string name="hero_tagline">Нейросетевой синтез речи на устройстве</string>
-    <string name="header_synthesis_sub">Озвучивание текста голосом Qwen3</string>
+    <string name="header_synthesis_sub">Озвучивание текста выбранной моделью</string>
     <string name="header_models_sub">Загрузка и управление ONNX-моделями</string>
     <string name="header_settings_sub">Голос, движок и диагностика</string>
     <string name="label_text_input">Текст</string>
+    <string name="label_model">Модель</string>
+    <string name="model_single">Установлена одна модель</string>
     <string name="label_install_models">Установка моделей</string>
     <string name="card_models_hint">Архив ~724 МБ с 4 ONNX-файлами. Рекомендуется Wi-Fi.</string>
     <string name="engine_provider_hint">NNAPI может ускорить синтез, но на части устройств приводит к сбоям — при проблемах оставьте CPU.</string>
