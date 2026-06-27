@@ -104,7 +104,13 @@ Voices baked: Russian reference clips (one x-vector each, named by file).
 
 The app records a 16 kHz mono reference clip (`VoiceRecorder`), stores it via
 `CustomVoiceStore` under `filesDir/custom_voices/<id>.wav`, and shows it as a
-voice chip on the Synthesis tab. When the AR engine (`QwenArEngine`) is wired
-into the runtime, the speaker encoder turns each stored clip into an x-vector at
-load time, so user voices behave like baked ones. Until then the clips are
-persisted losslessly.
+voice chip on the Synthesis tab. `speaker_encoder.onnx` bakes the Kaldi fbank
+frontend into the graph (waveform → x-vector), so `VoiceCloner` computes the
+1024-d x-vector from the raw clip with no on-device DSP, caches it as
+`<id>.xvec`, and `QwenArEngine` merges these into its voice map at load — so a
+recorded voice synthesizes exactly like a baked one. If the active model has no
+encoder the clip is still kept and is cloned once such a model is active.
+
+`export_talker_ar.py` probes the encoder's feature layout, wraps it with
+torchaudio's Kaldi fbank (80/128-mel, 25/10 ms, povey window, utterance CMN),
+and validates the waveform→x-vector graph against `generate_speaker_prompt`.

@@ -4,6 +4,8 @@ import android.content.Context
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * On-device store for user-recorded voices (mic cloning references).
@@ -31,6 +33,29 @@ object CustomVoiceStore {
         File(context.filesDir, "custom_voices").apply { mkdirs() }
 
     fun clipFile(context: Context, id: String): File = File(dir(context), "$id.wav")
+
+    /** Cached speaker x-vector (float32 little-endian) for a custom voice. */
+    fun xvecFile(context: Context, id: String): File = File(dir(context), "$id.xvec")
+
+    fun saveXVector(context: Context, id: String, vec: FloatArray) {
+        val bb = ByteBuffer.allocate(vec.size * 4).order(ByteOrder.LITTLE_ENDIAN)
+        vec.forEach { bb.putFloat(it) }
+        xvecFile(context, id).writeBytes(bb.array())
+    }
+
+    /** All cached custom x-vectors, keyed by voice id (for the AR engine). */
+    fun loadXVectors(context: Context): Map<String, FloatArray> {
+        val out = LinkedHashMap<String, FloatArray>()
+        list(context).forEach { v ->
+            val f = xvecFile(context, v.id)
+            if (f.exists()) {
+                val raw = f.readBytes()
+                val fb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN).asFloatBuffer()
+                out[v.id] = FloatArray(fb.limit()) { fb.get(it) }
+            }
+        }
+        return out
+    }
 
     fun list(context: Context): List<CustomVoice> {
         val idx = File(dir(context), INDEX)
@@ -66,6 +91,7 @@ object CustomVoiceStore {
 
     fun remove(context: Context, id: String) {
         clipFile(context, id).delete()
+        xvecFile(context, id).delete()
         save(context, list(context).filterNot { it.id == id })
     }
 

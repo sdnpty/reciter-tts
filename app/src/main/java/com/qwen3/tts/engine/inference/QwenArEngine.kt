@@ -7,6 +7,7 @@ import android.content.Context
 import android.util.Log
 import com.qwen3.tts.engine.tokenizer.Qwen3Tokenizer
 import com.qwen3.tts.util.AudioHelper
+import com.qwen3.tts.util.CustomVoiceStore
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
@@ -49,7 +50,12 @@ class QwenArEngine(
                 return null
             }
 
-            val voices = loadVoices(modelDir)
+            // Baked voices + the user's recorded (cloned) voices, keyed by id.
+            val voices = LinkedHashMap<String, FloatArray>()
+            voices.putAll(loadVoices(modelDir))
+            CustomVoiceStore.loadXVectors(context).forEach { (id, vec) ->
+                if (vec.size == H) voices[id] = vec
+            }
             val cfg = runCatching { JSONObject(File(modelDir, "ar_config.json").readText()) }
                 .getOrNull()
             val role = cfg?.optJSONArray("role_tokens").toIntList(intArrayOf(151644, 77091, 198))

@@ -422,6 +422,97 @@ def quantize_for_android():
             print(f"  {fname}: quantization FAILED ({e}); kept fp32")
 
 
+# ── Stage 2e: speaker encoder (waveform → x-vector, for on-device cloning) ───
+# The speaker encoder takes Kaldi fbank features. To avoid re-implementing the
+# exact fbank on Android (a correctness minefield), we bake torchaudio's Kaldi-
+# compatible fbank INTO the graph, so the exported ONNX maps a raw 16 kHz mono
+# waveform straight to the 1024-d x-vector. Kotlin then needs zero DSP.
+
+def export_speaker_encoder(model):
+    se = getattr(model, "speaker_encoder", None)
+    if se is None:
+        print("  speaker_encoder NOT found on model — on-device cloning disabled "
+              "(baked voices still work). dir(model) to locate it.")
+        return
+    se = se.float().eval()
+
+    # Probe the feature layout the encoder expects: [B,T,M] or [B,M,T], M in {80,128}.
+    layout, n_mels = None, None
+    for (b, a1, a2) in [(1, 300, 80), (1, 300, 128), (1, 80, 300), (1, 128, 300)]:
+        try:
+            with torch.no_grad():
+                out = se(torch.randn(b, a1, a2))
+            dim = out.reshape(out.shape[0], -1).shape[-1]
+            if a2 in (80, 128):
+                layout, n_mels = "BTM", a2          # [B, frames, mels]
+            else:
+                layout, n_mels = "BMT", a1          # [B, mels, frames]
+            print(f"  speaker_encoder accepts {(b, a1, a2)} -> {tuple(out.shape)} "
+                  f"(layout={layout}, n_mels={n_mels}, xvec_dim={dim})")
+            break
+        except Exception:
+            continue
+    if layout is None:
+        print("  could not infer speaker_encoder input layout; skipping. "
+              "Share: [n for n,_ in model.speaker_encoder.named_children()]")
+        return
+
+    import torchaudio.compliance.kaldi as kaldi
+
+    class WavToXVector(torch.nn.Module):
+        def __init__(self, enc, n_mels, layout):
+            super().__init__()
+            self.enc = enc; self.n_mels = n_mels; self.layout = layout
+        def forward(self, wav):                     # wav: [1, N] float32 @16k, ~[-1,1]
+            feat = kaldi.fbank(wav, num_mel_bins=self.n_mels, sample_frequency=16000,
+                               frame_length=25.0, frame_shift=10.0, dither=0.0,
+                               window_type="povey", use_energy=False)   # [T, M]
+            feat = feat - feat.mean(dim=0, keepdim=True)                 # utterance CMN
+            feat = feat.unsqueeze(0)                                     # [1, T, M]
+            if self.layout == "BMT":
+                feat = feat.transpose(1, 2)                             # [1, M, T]
+            return self.enc(feat)
+
+    m = WavToXVector(se, n_mels, layout).eval()
+    dummy = torch.randn(1, 16000)                  # 1 s of audio
+    try:
+        with torch.no_grad():
+            ref = m(dummy)
+        print(f"  WavToXVector: wav[1,16000] -> {tuple(ref.shape)}")
+    except Exception as e:
+        print(f"  fbank-in-graph wrapper failed ({e}); exporting encoder-only is not "
+              f"supported on-device. Skipping speaker encoder.")
+        return
+
+    path = f"{OUT}/speaker_encoder.onnx"
+    torch.onnx.export(m, (dummy,), path, input_names=["waveform"],
+                      output_names=["xvector"],
+                      dynamic_axes={"waveform": {1: "n"}}, opset_version=OPSET,
+                      do_constant_folding=True)
+    meta = {"input": "waveform", "sample_rate": 16000, "n_mels": int(n_mels),
+            "layout": layout, "xvec_dim": int(ref.reshape(1, -1).shape[-1])}
+    with open(f"{OUT}/speaker_encoder_meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"  speaker_encoder.onnx: {os.path.getsize(path)/1024**2:.1f} MB  meta={meta}")
+
+    # Validate against the model's own speaker-prompt path if it's reachable.
+    try:
+        import onnxruntime as ort, numpy as np
+        gsp = getattr(model, "generate_speaker_prompt", None) or \
+              getattr(model_wrapper, "generate_speaker_prompt", None)  # noqa: F821
+        if gsp is not None:
+            with torch.no_grad():
+                gt = gsp(dummy, x_vector_only_mode=True)
+            gt = (gt[0] if isinstance(gt, (tuple, list)) else gt).reshape(-1).numpy()
+            sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+            ov = sess.run(None, {"waveform": dummy.numpy()})[0].reshape(-1)
+            n = min(len(gt), len(ov))
+            print(f"  VALIDATION max|onnx-prompt| = {np.abs(gt[:n]-ov[:n]).max():.3e} "
+                  f"(small = fbank+encoder reproduces generate_speaker_prompt)")
+    except Exception as e:
+        print(f"  (speaker-prompt validation skipped: {e})")
+
+
 def write_manifest():
     import json
     files = sorted(os.listdir(OUT))
@@ -443,6 +534,8 @@ if __name__ == "__main__":
     export_subtalker(model)         # noqa: F821
     print("\n=== Stage 2d: code2wav ===")
     export_code2wav(model)          # noqa: F821
+    print("\n=== Stage 2e: speaker encoder (waveform -> x-vector) ===")
+    export_speaker_encoder(model)   # noqa: F821
     quantize_for_android()
     write_manifest()
     print("\nDone. Full ONNX model set built (INT8). Next: bake voices + Kotlin decoder.")

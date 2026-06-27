@@ -22,6 +22,7 @@ import com.qwen3.tts.databinding.FragmentSynthesisBinding
 import com.qwen3.tts.ui.TTSViewModel
 import com.qwen3.tts.util.CustomVoiceStore
 import com.qwen3.tts.util.ModelConfig
+import com.qwen3.tts.util.VoiceCloner
 import com.qwen3.tts.util.VoiceRecorder
 import java.io.File
 import java.util.Locale
@@ -105,6 +106,27 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         }
     }
 
+    /**
+     * Computes the speaker x-vector for a freshly recorded clip off the UI thread,
+     * using the active model's `speaker_encoder.onnx`. When the encoder is present
+     * the cloned voice becomes selectable for synthesis; otherwise the clip is
+     * kept and will be cloned once a model with an encoder is active.
+     */
+    private fun cloneInBackground(voiceId: String, clip: File) {
+        val ctx = requireContext().applicationContext
+        Thread {
+            val cloner = VoiceCloner.forModel(ModelConfig.activeModelDir(ctx)) ?: return@Thread
+            val vec = cloner.clone(clip)
+            cloner.release()
+            if (vec != null && vec.isNotEmpty()) {
+                CustomVoiceStore.saveXVector(ctx, voiceId, vec)
+                activity?.runOnUiThread {
+                    if (isAdded) Toast.makeText(ctx, R.string.voice_cloned, Toast.LENGTH_SHORT).show()
+                }
+            }
+        }.start()
+    }
+
     private fun promptVoiceName() {
         val clip = pendingClip ?: return
         val input = EditText(requireContext()).apply {
@@ -125,6 +147,7 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
                     requireContext(),
                     getString(R.string.record_saved, voice.displayName), Toast.LENGTH_SHORT
                 ).show()
+                cloneInBackground(voice.id, File(voice.clipPath))
             }
             .setNegativeButton(R.string.dialog_cancel) { _, _ ->
                 clip.delete(); pendingClip = null
