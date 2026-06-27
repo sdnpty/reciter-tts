@@ -247,10 +247,100 @@ def export_talker_step(model):
         print(f"  validation FAILED: {e}")
 
 
+# ── Stage 2c: subtalker (code_predictor) ─────────────────────────────────────
+# The subtalker refines code0 into residual codebooks 1..15. Its forward indexes
+# codec_embedding[gs-1] and lm_head[gs] by the generation step, which ONNX can't
+# do at runtime. So we export the SHARED backbone once (small_to_mtp_projection +
+# 5-layer model, KV cache, seq=1) and dump the 15 embeddings + 15 heads as raw
+# fp16 tables; Kotlin gathers/matmuls them per step. The seq=2 prefill (past_hidden
+# then last_id_hidden) is replayed as two seq=1 steps.
+
+def export_subtalker(model):
+    import numpy as np
+    from transformers.cache_utils import DynamicCache
+    cp = _talker(model).code_predictor
+    backbone = cp.model
+    proj = cp.small_to_mtp_projection
+    n_layers = len(backbone.layers)
+    cfg = backbone.config
+    nkv = getattr(cfg, "num_key_value_heads", getattr(cfg, "num_attention_heads"))
+    hd = getattr(cfg, "head_dim", cfg.hidden_size // cfg.num_attention_heads)
+    ng = len(cp.lm_head)
+    print(f"  cp layers={n_layers} kv_heads={nkv} head_dim={hd} groups={ng}")
+    for mod in backbone.modules():
+        c = getattr(mod, "config", None)
+        if c is not None and hasattr(c, "_attn_implementation"):
+            c._attn_implementation = "eager"
+
+    class Step(torch.nn.Module):
+        def __init__(self):
+            super().__init__(); self.proj = proj; self.backbone = backbone; self.n = n_layers
+        def forward(self, inputs_embeds, position_ids, cache_position, *pkv):
+            past = DynamicCache.from_legacy_cache(
+                tuple((pkv[2 * i], pkv[2 * i + 1]) for i in range(self.n)))
+            out = self.backbone(input_ids=None, inputs_embeds=self.proj(inputs_embeds),
+                                position_ids=position_ids, past_key_values=past,
+                                use_cache=True, cache_position=cache_position, return_dict=True)
+            flat = []
+            for k, v in out.past_key_values.to_legacy_cache():
+                flat += [k, v]
+            return (out.last_hidden_state, *flat)
+
+    m = Step().float().eval()
+
+    def make_inputs(L):
+        emb = _det_float(1, 1, 1024)
+        pos = torch.full((1, 1), L, dtype=torch.long)
+        cpos = torch.tensor([L], dtype=torch.long)
+        pkv = []
+        for _ in range(n_layers):
+            pkv += [_det_float(1, nkv, L, hd), _det_float(1, nkv, L, hd)]
+        return (emb, pos, cpos, *pkv)
+
+    args = make_inputs(2)
+    in_names = ["inputs_embeds", "position_ids", "cache_position"]
+    out_names = ["hidden"]
+    dyn = {"inputs_embeds": {0: "b"}, "hidden": {0: "b"}}
+    for i in range(n_layers):
+        in_names += [f"past_k_{i}", f"past_v_{i}"]
+        out_names += [f"present_k_{i}", f"present_v_{i}"]
+        dyn[f"past_k_{i}"] = {0: "b", 2: "past"}; dyn[f"past_v_{i}"] = {0: "b", 2: "past"}
+        dyn[f"present_k_{i}"] = {0: "b", 2: "p1"}; dyn[f"present_v_{i}"] = {0: "b", 2: "p1"}
+
+    with torch.no_grad():
+        ref = m(*args)
+    print(f"  torch sub hidden: {tuple(ref[0].shape)}")
+    path = f"{OUT}/subtalker_step.onnx"
+    torch.onnx.export(m, args, path, input_names=in_names, output_names=out_names,
+                      dynamic_axes=dyn, opset_version=OPSET, do_constant_folding=True)
+    print(f"  subtalker_step.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
+
+    # dump the 15 codec embeddings + 15 heads (raw fp16, gathered in Kotlin)
+    ce = torch.stack([backbone.codec_embedding[i].weight.detach() for i in range(ng)])   # [G,2048,1024]
+    hw = torch.stack([cp.lm_head[i].weight.detach() for i in range(ng)])                 # [G,2048,1024]
+    ce.to(torch.float16).cpu().numpy().tofile(f"{OUT}/subtalker_codec_embed.f16")
+    hw.to(torch.float16).cpu().numpy().tofile(f"{OUT}/subtalker_heads.f16")
+    print(f"  subtalker_codec_embed.f16: {tuple(ce.shape)}  subtalker_heads.f16: {tuple(hw.shape)}")
+
+    try:
+        import onnxruntime as ort
+        sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        a2 = make_inputs(5)
+        with torch.no_grad():
+            tref = m(*a2)[0].numpy()
+        feed = {in_names[i]: a2[i].numpy() for i in range(len(in_names))}
+        oout = sess.run(None, feed)[0]
+        print(f"  VALIDATION (cache_len=5) max|onnx-torch| = {np.abs(oout - tref).max():.3e} (should be < 1e-3)")
+    except Exception as e:
+        print(f"  validation FAILED: {e}")
+
+
 if __name__ == "__main__":
     print("=== Stage 1: text_cond + codec_embed ===")
     export_text_cond_table(model)   # noqa: F821  (provided by the Colab session)
     export_codec_embed(model)       # noqa: F821
     print("\n=== Stage 2b: talker_step (KV-cache, single step) ===")
     export_talker_step(model)       # noqa: F821
-    print("\nDone. Next: subtalker (code_predictor) export + Kotlin AR loop.")
+    print("\n=== Stage 2c: subtalker (code_predictor) ===")
+    export_subtalker(model)         # noqa: F821
+    print("\nDone. Next: Kotlin AR decoder + prefill + code2wav wiring.")
