@@ -80,53 +80,65 @@ def export_codec_embed(model):
           f"(num_embeddings={talker.model.codec_embedding.num_embeddings})")
 
 
-class TalkerLogits(torch.nn.Module):
-    """Prefill-mode talker: inputs_embeds[1,T,H] (+ attention_mask) -> logits[1,T,3072].
+def _pos_ids(T):
+    """3D RoPE position ids (3, 1, T) = arange broadcast. For a non-padded causal
+    prefill this matches the model's get_rope_index output, but as an explicit
+    input it keeps the exported graph dynamic over sequence length."""
+    p = torch.arange(T, dtype=torch.long).view(1, 1, T)
+    return p.expand(3, 1, T).contiguous()
 
-    With seq>1 the talker takes the prefill branch (generation_step=-1, no
-    subtalker) and computes its own RoPE internally, so we reuse the model's
-    exact positional logic. The Kotlin decoder re-runs this on a growing
-    inputs_embeds and reads logits[:, -1] each step."""
+
+class TalkerLogits(torch.nn.Module):
+    """inputs_embeds[1,T,H] + position_ids[3,1,T] (+ attention_mask) -> logits[1,T,3072].
+
+    Calls the backbone (talker.model) directly with explicit position_ids, so the
+    custom get_rope_index isn't traced (which baked a fixed seq length). The
+    Kotlin decoder re-runs this on a growing inputs_embeds and reads logits[:,-1]."""
     def __init__(self, talker):
         super().__init__()
-        self.talker = talker
-    def forward(self, inputs_embeds, attention_mask):
-        out = self.talker(inputs_embeds=inputs_embeds, attention_mask=attention_mask,
-                          use_cache=False, return_dict=True)
-        return out.logits
+        self.backbone = talker.model
+        self.codec_head = talker.codec_head
+    def forward(self, inputs_embeds, position_ids, attention_mask):
+        out = self.backbone(input_ids=None, inputs_embeds=inputs_embeds,
+                            position_ids=position_ids, attention_mask=attention_mask,
+                            use_cache=False, return_dict=True)
+        return self.codec_head(out.last_hidden_state)
 
 
 def export_talker_logits(model):
     talker = _talker(model)
     m = TalkerLogits(talker).float().eval()
     T = 8
-    dummy_emb = torch.randn(1, T, 1024)
-    dummy_mask = torch.ones(1, T, dtype=torch.long)
+    emb = torch.randn(1, T, 1024); pos = _pos_ids(T); mask = torch.ones(1, T, dtype=torch.long)
     with torch.no_grad():
-        ref = m(dummy_emb, dummy_mask)
+        ref = m(emb, pos, mask)
     print(f"  torch logits: {tuple(ref.shape)}")
     path = f"{OUT}/talker_logits.onnx"
     torch.onnx.export(
-        m, (dummy_emb, dummy_mask), path,
-        input_names=["inputs_embeds", "attention_mask"], output_names=["logits"],
+        m, (emb, pos, mask), path,
+        input_names=["inputs_embeds", "position_ids", "attention_mask"],
+        output_names=["logits"],
         dynamic_axes={"inputs_embeds": {0: "b", 1: "t"},
+                      "position_ids": {1: "b", 2: "t"},
                       "attention_mask": {0: "b", 1: "t"},
                       "logits": {0: "b", 1: "t"}},
         opset_version=OPSET, do_constant_folding=True)
     print(f"  talker_logits.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
-    # validate ONNX == torch on a fresh input
+    # validate at a DIFFERENT length to prove the graph is dynamic + faithful
     try:
         import onnxruntime as ort, numpy as np
         sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
-        emb2 = torch.randn(1, 10, 1024); mask2 = torch.ones(1, 10, dtype=torch.long)
+        T2 = 13
+        emb2 = torch.randn(1, T2, 1024); pos2 = _pos_ids(T2); mask2 = torch.ones(1, T2, dtype=torch.long)
         with torch.no_grad():
-            tref = m(emb2, mask2).numpy()
+            tref = m(emb2, pos2, mask2).numpy()
         oout = sess.run(None, {"inputs_embeds": emb2.numpy(),
+                               "position_ids": pos2.numpy().astype(np.int64),
                                "attention_mask": mask2.numpy().astype(np.int64)})[0]
-        print(f"  VALIDATION max|onnx-torch| = {np.abs(oout - tref).max():.3e} "
+        print(f"  VALIDATION (T={T2}) max|onnx-torch| = {np.abs(oout - tref).max():.3e} "
               f"(should be < 1e-3)")
     except Exception as e:
-        print(f"  validation skipped: {e}")
+        print(f"  validation FAILED: {e}")
 
 
 if __name__ == "__main__":
