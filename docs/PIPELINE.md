@@ -87,3 +87,12 @@ Reference implementations: `tools/infer_onnx_reference.py` (AR loop) and
 `<filesDir>/models/qwen3-ar/` containing the files from step 1 (INT8) +
 `baked_voices.bin` (concatenated float32 x-vectors) + `voices.json` (names) +
 `vocab.json`, `merges.txt` for the tokenizer.
+
+## 5. inputIdsFor (from ar_config.json, captured)
+
+```
+role_tokens   = [151644, 77091, 198]                 # <|im_start|>assistant\n
+suffix_tokens = [151645, 198, 151644, 77091, 198]    # <|im_end|>\n<|im_start|>assistant\n
+inputIdsFor(text) = role_tokens + Qwen3Tokenizer.encodeForTTS(text) + suffix_tokens
+```
+Voices baked (CMU ARCTIC): male_us(bdl), male_ca(jmk), male_in(ksp), female_us(slt).
