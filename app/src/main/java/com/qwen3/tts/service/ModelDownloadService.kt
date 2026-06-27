@@ -297,11 +297,10 @@ class ModelDownloadService : Service() {
             ZipInputStream(input.buffered(BUFFER_SIZE)).use { zis ->
                 var entry = zis.nextEntry
                 while (entry != null) {
-                    val baseName = entry.name.substringAfterLast("/")
-                    val isOnnx = baseName.endsWith(".onnx", ignoreCase = true)
-                    val isTokenizer = baseName == "vocab.json" || baseName == "merges.txt"
-                    
-                    if (!entry.isDirectory && (isOnnx || isTokenizer)) {
+                    // Count every extractable file so the progress denominator
+                    // matches the numerator (which is bumped per extracted entry).
+                    // Counting only .onnx/tokenizer gave totals like "15 / 7".
+                    if (!entry.isDirectory) {
                         count++
                     }
                     zis.closeEntry()
