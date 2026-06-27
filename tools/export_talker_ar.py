@@ -66,10 +66,20 @@ class CodecEmbed(torch.nn.Module):
         return self.codec_embedding(codes)
 
 
+def _det_float(*shape):
+    """Deterministic stand-in for torch.randn (random ops can trip an active
+    vmap randomness-error mode after the onnxscript/dynamo import)."""
+    n = 1
+    for s in shape:
+        n *= s
+    return (torch.arange(n, dtype=torch.float32) % 13 - 6).reshape(*shape) * 0.1
+
+
 def export_codec_embed(model):
     talker = _talker(model)
     m = CodecEmbed(talker).float().eval()
-    dummy = torch.randint(0, talker.model.codec_embedding.num_embeddings, (1, 4), dtype=torch.long)
+    N = talker.model.codec_embedding.num_embeddings
+    dummy = (torch.arange(4, dtype=torch.long) % N).view(1, 4)
     path = f"{OUT}/codec_embed.onnx"
     torch.onnx.export(
         m, (dummy,), path,
@@ -109,7 +119,7 @@ def export_talker_logits(model):
     talker = _talker(model)
     m = TalkerLogits(talker).float().eval()
     T = 8
-    emb = torch.randn(1, T, 1024); pos = _pos_ids(T); mask = torch.ones(1, T, dtype=torch.long)
+    emb = _det_float(1, T, 1024); pos = _pos_ids(T); mask = torch.ones(1, T, dtype=torch.long)
     with torch.no_grad():
         ref = m(emb, pos, mask)
     print(f"  torch logits: {tuple(ref.shape)}")
@@ -133,7 +143,7 @@ def export_talker_logits(model):
         import onnxruntime as ort, numpy as np
         sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
         T2 = 13
-        emb2 = torch.randn(1, T2, 1024); pos2 = _pos_ids(T2); mask2 = torch.ones(1, T2, dtype=torch.long)
+        emb2 = _det_float(1, T2, 1024) + 0.3; pos2 = _pos_ids(T2); mask2 = torch.ones(1, T2, dtype=torch.long)
         with torch.no_grad():
             tref = m(emb2, pos2, mask2).numpy()
         oout = sess.run(None, {"inputs_embeds": emb2.numpy(),
