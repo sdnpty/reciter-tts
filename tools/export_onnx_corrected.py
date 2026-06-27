@@ -99,16 +99,20 @@ if embed is None:
             embed = module
             break
 
-# Find lm_head
+# Find the talker output head. Prefer the AUDIO codec head: this model exposes
+# `codec_head` (Linear, out_features = codec vocab). Falling back to a text
+# `lm_head` would make the talker emit TEXT tokens instead of audio codes.
 lm_head = None
-for attr in ['lm_head', 'output_projection', 'classifier']:
+talker_head_is_codec = False
+for attr in ['codec_head', 'audio_head', 'audio_lm_head', 'lm_head', 'output_projection', 'classifier']:
     if hasattr(talker, attr):
         lm_head = getattr(talker, attr)
-        print(f"  Found talker.{attr}: {type(lm_head).__name__}")
+        talker_head_is_codec = attr in ('codec_head', 'audio_head', 'audio_lm_head')
+        print(f"  Found talker.{attr}: {type(lm_head).__name__}  (codec_head={talker_head_is_codec})")
         break
 
 if lm_head is None:
-    print("  WARNING: No lm_head found! Exporting backbone only (will NOT support generation)")
+    print("  WARNING: No talker head found! Exporting backbone only (will NOT support generation)")
 elif isinstance(lm_head, torch.nn.ModuleList):
     print(f"  lm_head is a ModuleList with {len(lm_head)} heads")
 
@@ -496,9 +500,14 @@ print("\n=== Generating model.json manifest ===")
 vocab_path = f"{ANDROID_DIR}/vocab.json"
 text_vocab_size = len(json.load(open(vocab_path))) if os.path.exists(vocab_path) else 151936
 
-# Audio codec tokens begin right after the text vocabulary in the talker logits.
-audio_token_start = text_vocab_size
 talker_dim = int(globals().get("TALKER_OUTPUT_DIM", 0))
+# With a dedicated codec head, the talker logits ARE the audio codebook, so the
+# coarse codes are argmax(logits) directly -> audioTokenStart = 0. Only a talker
+# that shares one combined text+codec vocab puts audio tokens after the text vocab.
+if globals().get("talker_head_is_codec", False):
+    audio_token_start = 0
+else:
+    audio_token_start = text_vocab_size
 
 try:
     eos_token_id = int(getattr(tokenizer, "eos_token_id", None) or 151645)
