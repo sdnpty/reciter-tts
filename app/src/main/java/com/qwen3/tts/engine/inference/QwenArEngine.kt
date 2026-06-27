@@ -114,6 +114,7 @@ class QwenArEngine(
         const val C_THINK = 2154; const val C_THINK_BOS = 2156; const val C_THINK_EOS = 2157
         const val LANG_RU = 2069
         const val MAX_FRAMES = 1500
+        const val MAX_CHUNK_CHARS = 240   // cap per synthesis unit (latency/memory bound)
     }
 
     private val env = OrtEnvironment.getEnvironment()
@@ -272,15 +273,47 @@ class QwenArEngine(
         onAudioChunk: (ByteArray?) -> Boolean
     ) {
         try {
-            var pcm = synthesizePcm(text, voiceName)
-            if (speed != 100) {
-                pcm = AudioHelper.timeStretch(pcm, speed / 100f, SR)
+            // Split into sentence-sized chunks so audio starts after the FIRST
+            // sentence instead of the whole paragraph, and playback pipelines
+            // with generation. Essential for real-time book reading.
+            val chunks = splitIntoChunks(text)
+            for (chunk in chunks) {
+                var pcm = synthesizePcm(chunk, voiceName)
+                if (speed != 100) pcm = AudioHelper.timeStretch(pcm, speed / 100f, SR)
+                val keepGoing = onAudioChunk(AudioHelper.floatToPcm16(pcm))
+                if (!keepGoing) break          // caller asked to stop (between sentences)
             }
-            onAudioChunk(AudioHelper.floatToPcm16(pcm))
         } catch (e: Throwable) {
             Log.e(TAG, "AR synthesis failed: ${e.message}", e)
             onAudioChunk(null)
         }
+    }
+
+    /**
+     * Breaks text into sentence-sized units, then caps over-long sentences at
+     * [MAX_CHUNK_CHARS] on clause boundaries so time-to-first-audio and peak
+     * memory stay bounded for long passages.
+     */
+    private fun splitIntoChunks(text: String): List<String> {
+        val out = ArrayList<String>()
+        val sentences = text.split(Regex("(?<=[.!?…。！？\\n])\\s+"))
+        for (raw in sentences) {
+            val s = raw.trim()
+            if (s.isEmpty()) continue
+            if (s.length <= MAX_CHUNK_CHARS) { out += s; continue }
+            // Long sentence: split on clause separators, packing up to the cap.
+            val parts = s.split(Regex("(?<=[,;:—–])\\s+"))
+            val sb = StringBuilder()
+            for (p in parts) {
+                if (sb.isNotEmpty() && sb.length + p.length > MAX_CHUNK_CHARS) {
+                    out += sb.toString().trim(); sb.setLength(0)
+                }
+                if (sb.isNotEmpty()) sb.append(' ')
+                sb.append(p)
+            }
+            if (sb.isNotEmpty()) out += sb.toString().trim()
+        }
+        return if (out.isEmpty()) listOf(text.trim()) else out
     }
 
     private fun synthesizePcm(text: String, voiceName: String): FloatArray {

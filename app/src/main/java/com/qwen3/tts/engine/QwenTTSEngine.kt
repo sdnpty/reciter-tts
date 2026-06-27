@@ -148,6 +148,14 @@ class QwenTTSEngine : TextToSpeechService() {
     // so adding a model with new languages requires no engine code changes.
     private fun profile() = ModelConfig.activeProfile(this)
 
+    /** Model voices plus the user's recorded (cloned) voices, so both are
+     *  selectable through the standard Android TextToSpeech voice API. */
+    private fun allVoiceSpecs(): List<ModelConfig.VoiceSpec> =
+        profile().voices + com.qwen3.tts.util.CustomVoiceStore.list(this).map { it.toVoiceSpec() }
+
+    private fun voiceSpecById(id: String?): ModelConfig.VoiceSpec? =
+        allVoiceSpecs().firstOrNull { it.id == id }
+
     private fun qualityOf(spec: ModelConfig.VoiceSpec): Int = when (spec.quality.lowercase()) {
         "very_high" -> Voice.QUALITY_VERY_HIGH
         "high" -> Voice.QUALITY_HIGH
@@ -178,7 +186,7 @@ class QwenTTSEngine : TextToSpeechService() {
         return availability
     }
 
-    override fun onGetVoices(): List<Voice> = profile().voices.map { spec ->
+    override fun onGetVoices(): List<Voice> = allVoiceSpecs().map { spec ->
         Voice(spec.id, spec.toLocale(), qualityOf(spec), Voice.LATENCY_NORMAL, false, emptySet())
     }
 
@@ -191,7 +199,7 @@ class QwenTTSEngine : TextToSpeechService() {
     }
 
     override fun onIsValidVoiceName(voiceName: String): Int =
-        if (profile().voiceById(voiceName) != null) TextToSpeech.LANG_COUNTRY_AVAILABLE
+        if (voiceSpecById(voiceName) != null) TextToSpeech.LANG_COUNTRY_AVAILABLE
         else TextToSpeech.LANG_NOT_SUPPORTED
 
     override fun onLoadVoice(voiceName: String): Int = onIsValidVoiceName(voiceName)
