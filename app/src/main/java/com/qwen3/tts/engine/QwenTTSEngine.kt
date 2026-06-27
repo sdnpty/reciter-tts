@@ -260,13 +260,19 @@ class QwenTTSEngine : TextToSpeechService() {
             return
         }
 
+        val tStart = System.currentTimeMillis()
+        var totalPcmBytes = 0L
         try {
             engine.synthesize(text, voiceName, speed) { audioChunk ->
                 if (stopRequested.get()) {
                     return@synthesize false
                 }
                 if (audioChunk != null && audioChunk.isNotEmpty()) {
-                    logger.i(TAG, "Streaming ${audioChunk.size} PCM bytes")
+                    totalPcmBytes += audioChunk.size
+                    val audioSec = totalPcmBytes / 2f / engine.sampleRateHz
+                    val el = System.currentTimeMillis() - tStart
+                    logger.i(TAG, "chunk ${audioChunk.size}B  total=${"%.2f".format(audioSec)}s audio in " +
+                        "${el}ms  RTF=${"%.2f".format(el / 1000f / audioSec.coerceAtLeast(0.01f))}")
                     val maxBuffer = callback.maxBufferSize
                     var offset = 0
                     while (offset < audioChunk.size) {
@@ -282,7 +288,10 @@ class QwenTTSEngine : TextToSpeechService() {
                 true
             }
             callback.done()
-            logger.i(TAG, "Synthesis callback completed")
+            val total = System.currentTimeMillis() - tStart
+            val audioSec = totalPcmBytes / 2f / engine.sampleRateHz
+            logger.i(TAG, "Synthesis done: ${"%.2f".format(audioSec)}s audio in ${total}ms " +
+                "(RTF=${"%.2f".format(total / 1000f / audioSec.coerceAtLeast(0.01f))})")
         } catch (e: Exception) {
             Log.e(TAG, "Synthesis error", e)
             logger.e(TAG, "Synthesis error", e)

@@ -256,20 +256,26 @@ class QwenArEngine(
 
     private fun add(a: FloatArray, b: FloatArray): FloatArray = FloatArray(H) { a[it] + b[it] }
 
+    // Reusable 8 MB scratch: per-element FloatBuffer.get() is ~10x slower than
+    // float[] access, and argmaxHead does 2048*1024 reads per group. Bulk-copy
+    // the group slice into this array once, then do the matmul on the array.
+    private val headBuf = FloatArray(2048 * H)
+
     private fun argmaxHead(hidden: FloatArray, g: Int): Int {
         // logits[v] = hidden · subHead[g][v]; subHead layout [g][v][H]
-        val base = g * 2048 * H
+        synchronized(subHead) { subHead.position(g * 2048 * H); subHead.get(headBuf, 0, 2048 * H) }
         var best = 0; var bv = Float.NEGATIVE_INFINITY
         for (v in 0 until 2048) {
-            var s = 0f; val off = base + v * H
-            for (d in 0 until H) s += hidden[d] * subHead.get(off + d)
+            var s = 0f; val off = v * H
+            for (d in 0 until H) s += hidden[d] * headBuf[off + d]
             if (s > bv) { bv = s; best = v }
         }
         return best
     }
     private fun subEmbRow(g: Int, code: Int): FloatArray {
-        val off = (g * 2048 + code) * H
-        return FloatArray(H) { subEmb.get(off + it) }
+        val out = FloatArray(H)
+        synchronized(subEmb) { subEmb.position((g * 2048 + code) * H); subEmb.get(out, 0, H) }
+        return out
     }
 
     private fun selectCode0(logits: FloatArray, history: Set<Int>): Int {

@@ -26,12 +26,24 @@ android {
         minSdk = 27
         targetSdk = 34
         // Bump patch (and versionCode) on every commit: 1.0.1 -> 1.0.2 -> ...
-        versionCode = 10004
-        versionName = "1.0.4"
+        versionCode = 10005
+        versionName = "1.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
 
+    }
+
+    signingConfigs {
+        // Fixed debug key committed to the repo so every CI build is signed with
+        // the SAME signature — otherwise updating over a previous build fails with
+        // a "version/signature conflict" (each CI run generates a new debug key).
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
     }
 
     buildTypes {
@@ -47,6 +59,7 @@ android {
             isMinifyEnabled = false
             applicationIdSuffix = ".debug"
             versionNameSuffix = "-debug"
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
