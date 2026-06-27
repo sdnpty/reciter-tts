@@ -157,8 +157,11 @@ class QwenArEngine(
     private val c2w = createSession("code2wav.onnx")
 
     private val textCond = RandomAccessFile(File(modelDir, "text_cond_table.f16"), "r")
-    private val subEmb = loadF16(File(modelDir, "subtalker_codec_embed.f16"), GROUPS * 2048 * H) // [15*2048*1024]
-    private val subHead = loadF16(File(modelDir, "subtalker_heads.f16"), GROUPS * 2048 * H)
+    // [15,2048,1024] f16 tables → ~120 MB each as float32. Keep them in DIRECT
+    // (off-heap/native) buffers so they don't blow the ~512 MB Java heap on
+    // mid-range phones (was OOMing in loadF16).
+    private val subEmb = loadF16Direct(File(modelDir, "subtalker_codec_embed.f16"), GROUPS * 2048 * H)
+    private val subHead = loadF16Direct(File(modelDir, "subtalker_heads.f16"), GROUPS * 2048 * H)
 
     // ── helpers ──────────────────────────────────────────────
     private fun h2f(h: Int): Float {
@@ -173,10 +176,13 @@ class QwenArEngine(
         }
         return Float.fromBits(bits)
     }
-    private fun loadF16(f: File, n: Int): FloatArray {
-        val raw = f.readBytes(); val out = FloatArray(n)
+    /** Load an f16 file into a DIRECT FloatBuffer (native memory, off the Java
+     *  heap). Only the transient raw bytes touch the heap during conversion. */
+    private fun loadF16Direct(f: File, n: Int): java.nio.FloatBuffer {
+        val out = ByteBuffer.allocateDirect(n * 4).order(ByteOrder.nativeOrder()).asFloatBuffer()
+        val raw = f.readBytes()
         val bb = ByteBuffer.wrap(raw).order(ByteOrder.LITTLE_ENDIAN)
-        for (i in 0 until n) out[i] = h2f(bb.short.toInt() and 0xffff)
+        for (i in 0 until n) out.put(i, h2f(bb.short.toInt() and 0xffff))
         return out
     }
     /** one row (1024) of text_cond_table by token id. */
@@ -256,14 +262,14 @@ class QwenArEngine(
         var best = 0; var bv = Float.NEGATIVE_INFINITY
         for (v in 0 until 2048) {
             var s = 0f; val off = base + v * H
-            for (d in 0 until H) s += hidden[d] * subHead[off + d]
+            for (d in 0 until H) s += hidden[d] * subHead.get(off + d)
             if (s > bv) { bv = s; best = v }
         }
         return best
     }
     private fun subEmbRow(g: Int, code: Int): FloatArray {
         val off = (g * 2048 + code) * H
-        return FloatArray(H) { subEmb[off + it] }
+        return FloatArray(H) { subEmb.get(off + it) }
     }
 
     private fun selectCode0(logits: FloatArray, history: Set<Int>): Int {

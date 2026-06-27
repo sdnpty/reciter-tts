@@ -25,6 +25,10 @@ class QwenTTSEngine : TextToSpeechService() {
         private const val CHANNELS = 1
         private const val PREFS = "qwen3_tts_prefs"
         private const val INIT_TIMEOUT_SEC = 120L
+        // Process-wide lock: if two service instances start at once (e.g. the
+        // system TTS and the in-app preview), serialize the heavy model load so
+        // their peak allocations don't overlap and OOM the process.
+        private val LOAD_LOCK = Any()
     }
 
     @Volatile
@@ -74,7 +78,7 @@ class QwenTTSEngine : TextToSpeechService() {
                 .getString("device", "cpu") == "nnapi"
             logger.i(TAG, "Loading '${profile.id}' (arch=${profile.architecture}, EP=${if (useNnapi) "NNAPI" else "CPU"})")
 
-            val built: SpeechSynthesizer? = when (profile.architecture.lowercase()) {
+            val built: SpeechSynthesizer? = synchronized(LOAD_LOCK) { when (profile.architecture.lowercase()) {
                 "qwen3-codec-ar", "qwen3-tts-ar" -> buildArEngine(useNnapi)
                 "qwen3-codec", "" -> buildQwenEngine(profile, useNnapi)
                 "vits" -> buildVitsEngine(profile)
@@ -83,7 +87,7 @@ class QwenTTSEngine : TextToSpeechService() {
                     logger.e(TAG, "Architecture '${profile.architecture}' is not implemented yet — see docs/MODELS.md")
                     null
                 }
-            }
+            } }
             synthesizer = built
             if (built != null && built.isReady()) {
                 // Prime native arenas BEFORE going live so the first real request
