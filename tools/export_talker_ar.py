@@ -457,38 +457,79 @@ def export_speaker_encoder(model):
               "Share: [n for n,_ in model.speaker_encoder.named_children()]")
         return
 
-    import torchaudio.compliance.kaldi as kaldi
+    import math
+
+    def _kaldi_mel_matrix(nfft, sr, n_mels, low=20.0):
+        """Kaldi-style triangular mel filterbank [nfft//2+1, n_mels] (mel=1127·ln(1+f/700))."""
+        high = sr / 2.0
+        def mel(f): return 1127.0 * math.log(1.0 + f / 700.0)
+        mlow, mhigh = mel(low), mel(high)
+        pts = [mlow + i * (mhigh - mlow) / (n_mels + 1) for i in range(n_mels + 2)]
+        bins = nfft // 2 + 1
+        fb = torch.zeros(bins, n_mels)
+        for k in range(bins):
+            mf = mel(k * sr / nfft)
+            for m_ in range(n_mels):
+                l, c, r = pts[m_], pts[m_ + 1], pts[m_ + 2]
+                if l < mf <= c:
+                    fb[k, m_] = (mf - l) / (c - l)
+                elif c < mf < r:
+                    fb[k, m_] = (r - mf) / (r - c)
+        return fb
+
+    # Export-safe Kaldi fbank: framing + povey window + a DFT *matmul* (no
+    # aten::fft_rfft, which ONNX can't lower) + mel filterbank, baked in-graph.
+    FRAME, SHIFT, NFFT, EPS = 400, 160, 512, 1.1921e-07
+    _n = torch.arange(FRAME, dtype=torch.float32)
+    _povey = (0.5 - 0.5 * torch.cos(2 * math.pi * _n / (FRAME - 1))).pow(0.85)
+    _kk = torch.arange(NFFT // 2 + 1, dtype=torch.float32)
+    _nn = torch.arange(NFFT, dtype=torch.float32)
+    _ang = (2 * math.pi / NFFT) * torch.outer(_nn, _kk)          # [NFFT, NFFT/2+1]
+    _cos, _sin = torch.cos(_ang), torch.sin(_ang)
+    _melfb = _kaldi_mel_matrix(NFFT, 16000, n_mels)              # [NFFT/2+1, n_mels]
 
     class WavToXVector(torch.nn.Module):
-        def __init__(self, enc, n_mels, layout):
+        def __init__(self, enc, layout):
             super().__init__()
-            self.enc = enc; self.n_mels = n_mels; self.layout = layout
+            self.enc = enc; self.layout = layout
+            self.register_buffer("povey", _povey)
+            self.register_buffer("cosm", _cos); self.register_buffer("sinm", _sin)
+            self.register_buffer("melfb", _melfb)
         def forward(self, wav):                     # wav: [1, N] float32 @16k, ~[-1,1]
-            feat = kaldi.fbank(wav, num_mel_bins=self.n_mels, sample_frequency=16000,
-                               frame_length=25.0, frame_shift=10.0, dither=0.0,
-                               window_type="povey", use_energy=False)   # [T, M]
-            feat = feat - feat.mean(dim=0, keepdim=True)                 # utterance CMN
-            feat = feat.unsqueeze(0)                                     # [1, T, M]
+            fr = wav.unfold(1, FRAME, SHIFT)                    # [1, T, FRAME]
+            fr = fr - fr.mean(dim=-1, keepdim=True)             # remove DC
+            pre = torch.cat([fr[..., :1], fr[..., :-1]], dim=-1)
+            fr = fr - 0.97 * pre                               # pre-emphasis
+            fr = fr * self.povey
+            fr = torch.nn.functional.pad(fr, (0, NFFT - FRAME)) # [1, T, NFFT]
+            re = fr @ self.cosm; im = fr @ self.sinm           # DFT (power-symmetric)
+            power = re * re + im * im                          # [1, T, NFFT/2+1]
+            feat = torch.clamp(power @ self.melfb, min=EPS).log()  # [1, T, n_mels]
+            feat = feat - feat.mean(dim=1, keepdim=True)       # utterance CMN
             if self.layout == "BMT":
-                feat = feat.transpose(1, 2)                             # [1, M, T]
+                feat = feat.transpose(1, 2)                    # [1, n_mels, T]
             return self.enc(feat)
 
-    m = WavToXVector(se, n_mels, layout).eval()
+    m = WavToXVector(se, layout).eval()
     dummy = torch.randn(1, 16000)                  # 1 s of audio
     try:
         with torch.no_grad():
             ref = m(dummy)
         print(f"  WavToXVector: wav[1,16000] -> {tuple(ref.shape)}")
     except Exception as e:
-        print(f"  fbank-in-graph wrapper failed ({e}); exporting encoder-only is not "
-              f"supported on-device. Skipping speaker encoder.")
+        print(f"  fbank-in-graph wrapper failed ({e}); skipping speaker encoder "
+              f"(baked voices still work).")
         return
 
     path = f"{OUT}/speaker_encoder.onnx"
-    torch.onnx.export(m, (dummy,), path, input_names=["waveform"],
-                      output_names=["xvector"],
-                      dynamic_axes={"waveform": {1: "n"}}, opset_version=OPSET,
-                      do_constant_folding=True)
+    try:
+        torch.onnx.export(m, (dummy,), path, input_names=["waveform"],
+                          output_names=["xvector"],
+                          dynamic_axes={"waveform": {1: "n"}}, opset_version=OPSET,
+                          do_constant_folding=True)
+    except Exception as e:
+        print(f"  speaker_encoder export FAILED ({e}); skipping (baked voices still work).")
+        return
     meta = {"input": "waveform", "sample_rate": 16000, "n_mels": int(n_mels),
             "layout": layout, "xvec_dim": int(ref.reshape(1, -1).shape[-1])}
     with open(f"{OUT}/speaker_encoder_meta.json", "w") as f:
@@ -535,7 +576,10 @@ if __name__ == "__main__":
     print("\n=== Stage 2d: code2wav ===")
     export_code2wav(model)          # noqa: F821
     print("\n=== Stage 2e: speaker encoder (waveform -> x-vector) ===")
-    export_speaker_encoder(model)   # noqa: F821
+    try:
+        export_speaker_encoder(model)   # noqa: F821  (optional: on-device cloning)
+    except Exception as e:
+        print(f"  speaker encoder stage skipped ({e}); baked voices still work.")
     quantize_for_android()
     write_manifest()
     print("\nDone. Full ONNX model set built (INT8). Next: bake voices + Kotlin decoder.")
