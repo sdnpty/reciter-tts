@@ -477,37 +477,39 @@ def export_speaker_encoder(model):
                     fb[k, m_] = (r - mf) / (r - c)
         return fb
 
-    # Export-safe Kaldi fbank: framing + povey window + a DFT *matmul* (no
-    # aten::fft_rfft, which ONNX can't lower) + mel filterbank, baked in-graph.
+    # Export-safe Kaldi fbank: framing is done with a strided Conv1d whose
+    # kernels are the (povey-windowed) DFT basis — no aten::Unfold and no
+    # aten::fft_rfft, both of which ONNX can't lower. Pre-emphasis is a fixed
+    # 2-tap conv; remove-DC is skipped (it only perturbs the DC bin, which the
+    # mel filters above 20 Hz don't use). All ops are conv/matmul/elementwise.
+    import torch.nn.functional as F
     FRAME, SHIFT, NFFT, EPS = 400, 160, 512, 1.1921e-07
     _n = torch.arange(FRAME, dtype=torch.float32)
-    _povey = (0.5 - 0.5 * torch.cos(2 * math.pi * _n / (FRAME - 1))).pow(0.85)
-    _kk = torch.arange(NFFT // 2 + 1, dtype=torch.float32)
-    _nn = torch.arange(NFFT, dtype=torch.float32)
-    _ang = (2 * math.pi / NFFT) * torch.outer(_nn, _kk)          # [NFFT, NFFT/2+1]
-    _cos, _sin = torch.cos(_ang), torch.sin(_ang)
-    _melfb = _kaldi_mel_matrix(NFFT, 16000, n_mels)              # [NFFT/2+1, n_mels]
+    _povey = (0.5 - 0.5 * torch.cos(2 * math.pi * _n / (FRAME - 1))).pow(0.85)  # [FRAME]
+    _k = torch.arange(NFFT // 2 + 1, dtype=torch.float32)                       # [257]
+    _ang = (2 * math.pi / NFFT) * torch.outer(_k, _n)                           # [257, FRAME]
+    _cos_w = (_povey * torch.cos(_ang)).unsqueeze(1)        # [257, 1, FRAME] conv kernel
+    _sin_w = (_povey * torch.sin(_ang)).unsqueeze(1)
+    _melfb = _kaldi_mel_matrix(NFFT, 16000, n_mels)         # [257, n_mels]
+    _melconv = _melfb.t().unsqueeze(-1).contiguous()        # [n_mels, 257, 1] conv kernel
 
     class WavToXVector(torch.nn.Module):
         def __init__(self, enc, layout):
             super().__init__()
             self.enc = enc; self.layout = layout
-            self.register_buffer("povey", _povey)
-            self.register_buffer("cosm", _cos); self.register_buffer("sinm", _sin)
-            self.register_buffer("melfb", _melfb)
+            self.register_buffer("cos_w", _cos_w); self.register_buffer("sin_w", _sin_w)
+            self.register_buffer("melconv", _melconv)
         def forward(self, wav):                     # wav: [1, N] float32 @16k, ~[-1,1]
-            fr = wav.unfold(1, FRAME, SHIFT)                    # [1, T, FRAME]
-            fr = fr - fr.mean(dim=-1, keepdim=True)             # remove DC
-            pre = torch.cat([fr[..., :1], fr[..., :-1]], dim=-1)
-            fr = fr - 0.97 * pre                               # pre-emphasis
-            fr = fr * self.povey
-            fr = torch.nn.functional.pad(fr, (0, NFFT - FRAME)) # [1, T, NFFT]
-            re = fr @ self.cosm; im = fr @ self.sinm           # DFT (power-symmetric)
-            power = re * re + im * im                          # [1, T, NFFT/2+1]
-            feat = torch.clamp(power @ self.melfb, min=EPS).log()  # [1, T, n_mels]
-            feat = feat - feat.mean(dim=1, keepdim=True)       # utterance CMN
-            if self.layout == "BMT":
-                feat = feat.transpose(1, 2)                    # [1, n_mels, T]
+            wp = torch.cat([wav[:, :1], wav], dim=1)           # pad-left by 1
+            x = (wp[:, 1:] - 0.97 * wp[:, :-1]).unsqueeze(1)   # pre-emphasis, [1,1,N]
+            re = F.conv1d(x, self.cos_w, stride=SHIFT)         # [1, 257, T]
+            im = F.conv1d(x, self.sin_w, stride=SHIFT)
+            power = re * re + im * im                          # [1, 257, T]
+            mel = F.conv1d(power, self.melconv)                # [1, n_mels, T]
+            feat = torch.clamp(mel, min=EPS).log()             # [1, n_mels, T]
+            feat = feat - feat.mean(dim=2, keepdim=True)       # utterance CMN
+            if self.layout == "BTM":
+                feat = feat.transpose(1, 2)                    # [1, T, n_mels]
             return self.enc(feat)
 
     m = WavToXVector(se, layout).eval()
