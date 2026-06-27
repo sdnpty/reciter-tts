@@ -72,6 +72,24 @@ per-step text condition consumed by the generate loop above.
 - KV-cache ONNX export with dynamic past_key_values for 28 (talker) + 5
   (subtalker) layers.
 
+## Known constants (from the loaded 0.6B model)
+
+- talker hidden `H = 1024`; text cond table = `[151936, 1024]` (fp16, ~297 MB).
+- `tts_bos_token_id = 151672`, `tts_eos_token_id = 151673`, `tts_pad_token_id = 151671`.
+- codec_embedding = `Embedding(3072, 1024)`; code predictor = 15 × `Embedding(2048, 1024)`.
+
+## Validation-first workflow (required for stage 2)
+
+Stage 2 (talker_step / subtalker_step with KV cache + custom 3D RoPE) cannot be
+done blind. Before each ONNX export we capture PyTorch ground truth in Colab:
+1. get a working `model.generate(...)` producing a reference WAV;
+2. hook `talker.forward` to record the real arg shapes/dtypes (past_key_values
+   layout, position_ids, trailing_text_hidden, cache_position) for the first
+   steps;
+3. dump first-step `logits`, the per-frame codes, and final audio.
+Each ONNX building block is then verified to match these tensors numerically
+before it goes to the device.
+
 ## Scope note
 
 This is a large, multi-stage port comparable to the dedicated reference engines
