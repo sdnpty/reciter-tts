@@ -114,15 +114,19 @@ def export_talker_logits(model):
         ref = m(emb, pos, mask)
     print(f"  torch logits: {tuple(ref.shape)}")
     path = f"{OUT}/talker_logits.onnx"
+    # The legacy tracer freezes the seq length (internal shape ops become
+    # constants). The TorchDynamo exporter traces length symbolically, so use it
+    # with a shared dynamic dim for the sequence axis.
+    seq = torch.export.Dim("seq", min=2, max=8192)
     torch.onnx.export(
         m, (emb, pos, mask), path,
         input_names=["inputs_embeds", "position_ids", "attention_mask"],
         output_names=["logits"],
-        dynamic_axes={"inputs_embeds": {0: "b", 1: "t"},
-                      "position_ids": {1: "b", 2: "t"},
-                      "attention_mask": {0: "b", 1: "t"},
-                      "logits": {0: "b", 1: "t"}},
-        opset_version=OPSET, do_constant_folding=True)
+        dynamo=True,
+        dynamic_shapes={"inputs_embeds": {1: seq},
+                        "position_ids": {2: seq},
+                        "attention_mask": {1: seq}},
+        opset_version=OPSET)
     print(f"  talker_logits.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
     # validate at a DIFFERENT length to prove the graph is dynamic + faithful
     try:
