@@ -306,7 +306,9 @@ class QwenArEngine(
     override fun warmup() {
         try {
             stopRequested = false
-            synthesizePcm("привет", voices.keys.firstOrNull() ?: return)
+            // Prime arenas with just a few frames — a full synth here would block
+            // engine init for many seconds on slow devices (and heat the phone).
+            synthesizePcm("привет", voices.keys.firstOrNull() ?: return, maxFrames = 3)
             Log.i(TAG, "warmup complete")
         } catch (e: Throwable) {
             Log.w(TAG, "warmup skipped: ${e.message}")
@@ -365,7 +367,7 @@ class QwenArEngine(
         return if (out.isEmpty()) listOf(text.trim()) else out
     }
 
-    private fun synthesizePcm(text: String, voiceName: String): FloatArray {
+    private fun synthesizePcm(text: String, voiceName: String, maxFrames: Int = MAX_FRAMES): FloatArray {
         val xvec = voices[voiceName] ?: voices.values.firstOrNull() ?: error("no voices")
         val ids = inputIdsFor(text)
         val (prefill, trailing) = buildPrefill(ids, xvec)
@@ -380,7 +382,7 @@ class QwenArEngine(
         var pastHidden = hidden
         var pos = prefill.size; var step = 0
         val frames = ArrayList<IntArray>()
-        while (code0 != EOS && frames.size < MAX_FRAMES) {
+        while (code0 != EOS && frames.size < maxFrames) {
             if (stopRequested) {
                 kv.forEach { it.close() }
                 return if (frames.isEmpty()) FloatArray(0) else code2wav(frames)

@@ -120,13 +120,12 @@ object ModelConfig {
     /** Compile-time fallback when no manifest is installed. */
     val ACTIVE_PROFILE: ModelProfile = QWEN3_TTS_12HZ_06B
 
+    // The AR archive already ships canonical filenames that match the manifest,
+    // so nothing is renamed on extraction. (The old map renamed code2wav.onnx /
+    // speaker_encoder.onnx to *_android.onnx, which then failed the presence
+    // check and left the engine uninitialized.)
     val ARCHIVE_RENAME_MAP: Map<String, String>
-        get() = mapOf(
-            "talker_base.onnx" to "talker_base_android.onnx",
-            "code_predictor_base.onnx" to "code_predictor_base_android.onnx",
-            "code2wav.onnx" to "code2wav_android.onnx",
-            "speaker_encoder.onnx" to "speaker_encoder_android.onnx"
-        )
+        get() = emptyMap()
 
     // ── Directories & slots ──────────────────────────────────────
     //
