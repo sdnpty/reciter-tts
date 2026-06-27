@@ -29,10 +29,21 @@ class QwenTTSEngine : TextToSpeechService() {
         // system TTS and the in-app preview), serialize the heavy model load so
         // their peak allocations don't overlap and OOM the process.
         private val LOAD_LOCK = Any()
+        // The engine holds ~480 MB of off-heap tables. Android may run several
+        // TextToSpeechService instances at once (system TTS + in-app preview);
+        // if each built its own engine the allocations doubled and OOMed. Share
+        // ONE engine across all instances, keyed by what it was built from, and
+        // keep it for the process lifetime.
+        @Volatile
+        private var sharedSynth: SpeechSynthesizer? = null
+        private var sharedKey: String? = null
+        // Serializes actual synthesis: the shared engine reuses internal buffers
+        // and is not safe for concurrent decode. A second request (e.g. after a
+        // not-yet-effective Stop) waits instead of corrupting state / OOMing.
+        private val SYNTH_LOCK = Any()
     }
 
-    @Volatile
-    private var synthesizer: SpeechSynthesizer? = null
+    private val synthesizer: SpeechSynthesizer? get() = sharedSynth
     private lateinit var logger: TTSLogger
     private val isInitialized = AtomicBoolean(false)
     private val stopRequested = AtomicBoolean(false)
@@ -76,23 +87,41 @@ class QwenTTSEngine : TextToSpeechService() {
 
             val useNnapi = getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                 .getString("device", "cpu") == "nnapi"
-            logger.i(TAG, "Loading '${profile.id}' (arch=${profile.architecture}, EP=${if (useNnapi) "NNAPI" else "CPU"})")
+            val key = "${profile.id}|${ModelConfig.activeModelDir(this).absolutePath}|$useNnapi"
 
-            val built: SpeechSynthesizer? = synchronized(LOAD_LOCK) { when (profile.architecture.lowercase()) {
-                "qwen3-codec-ar", "qwen3-tts-ar" -> buildArEngine(useNnapi)
-                "qwen3-codec", "" -> buildQwenEngine(profile, useNnapi)
-                "vits" -> buildVitsEngine(profile)
-                "cosyvoice" -> CosyVoiceInferenceEngine(this, profile, profile.sampleRateHz)
-                else -> {
-                    logger.e(TAG, "Architecture '${profile.architecture}' is not implemented yet — see docs/MODELS.md")
-                    null
+            var reused = false
+            val built: SpeechSynthesizer? = synchronized(LOAD_LOCK) {
+                // Reuse the already-loaded engine if it matches; only rebuild when
+                // the model/EP actually changed (then free the old one first).
+                val existing = sharedSynth
+                if (existing != null && existing.isReady() && sharedKey == key) {
+                    logger.i(TAG, "Reusing loaded '${profile.id}' (EP=${if (useNnapi) "NNAPI" else "CPU"})")
+                    reused = true
+                    existing
+                } else {
+                    if (existing != null && sharedKey != key) {
+                        runCatching { existing.release() }
+                        sharedSynth = null; sharedKey = null
+                    }
+                    logger.i(TAG, "Loading '${profile.id}' (arch=${profile.architecture}, EP=${if (useNnapi) "NNAPI" else "CPU"})")
+                    val b = when (profile.architecture.lowercase()) {
+                        "qwen3-codec-ar", "qwen3-tts-ar" -> buildArEngine(useNnapi)
+                        "qwen3-codec", "" -> buildQwenEngine(profile, useNnapi)
+                        "vits" -> buildVitsEngine(profile)
+                        "cosyvoice" -> CosyVoiceInferenceEngine(this, profile, profile.sampleRateHz)
+                        else -> {
+                            logger.e(TAG, "Architecture '${profile.architecture}' is not implemented yet — see docs/MODELS.md")
+                            null
+                        }
+                    }
+                    if (b != null && b.isReady()) { sharedSynth = b; sharedKey = key }
+                    b
                 }
-            } }
-            synthesizer = built
+            }
             if (built != null && built.isReady()) {
                 // Prime native arenas BEFORE going live so the first real request
-                // isn't penalized and can't race the warmup on the same sessions.
-                runCatching { built.warmup() }
+                // isn't penalized. Skip when reusing an already-warmed engine.
+                if (!reused) runCatching { built.warmup() }
                 isInitialized.set(true)
                 logger.i(TAG, "Engine initialized successfully")
             } else {
@@ -143,9 +172,12 @@ class QwenTTSEngine : TextToSpeechService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        synthesizer?.release()
-        synthesizer = null
-        Log.i(TAG, "onDestroy: Engine released")
+        // Do NOT release the shared engine here: other service instances may be
+        // using it, and rebuilding it costs ~30 s + ~480 MB. It lives for the
+        // process lifetime; the OS reclaims it when the process dies.
+        stopRequested.set(true)
+        sharedSynth?.requestStop()
+        Log.i(TAG, "onDestroy: stop requested (shared engine kept)")
     }
 
     override fun onStop() {
@@ -262,7 +294,11 @@ class QwenTTSEngine : TextToSpeechService() {
 
         val tStart = System.currentTimeMillis()
         var totalPcmBytes = 0L
+        // Serialize: the shared engine isn't safe for concurrent decode. If a
+        // previous synthesis is still winding down after a Stop, wait for it.
         try {
+          synchronized(SYNTH_LOCK) {
+            if (stopRequested.get()) { callback.done(); return@synchronized }
             engine.synthesize(text, voiceName, speed) { audioChunk ->
                 if (stopRequested.get()) {
                     return@synthesize false
@@ -292,6 +328,7 @@ class QwenTTSEngine : TextToSpeechService() {
             val audioSec = totalPcmBytes / 2f / engine.sampleRateHz
             logger.i(TAG, "Synthesis done: ${"%.2f".format(audioSec)}s audio in ${total}ms " +
                 "(RTF=${"%.2f".format(total / 1000f / audioSec.coerceAtLeast(0.01f))})")
+          }
         } catch (e: Exception) {
             Log.e(TAG, "Synthesis error", e)
             logger.e(TAG, "Synthesis error", e)
