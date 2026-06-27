@@ -120,7 +120,11 @@ class QwenArEngine(
         const val C_PAD = 2148; const val C_BOS = 2149
         const val C_THINK = 2154; const val C_THINK_BOS = 2156; const val C_THINK_EOS = 2157
         const val LANG_RU = 2069
-        const val MAX_FRAMES = 360   // ~30s cap; if hit, EOS was never produced
+        // Diagnostic cap: until the model reliably emits EOS, decode only a short
+        // window so the user actually HEARS the output within ~30 s (babble vs.
+        // silence tells us whether the conditioning or the audio path is broken).
+        // Raise back to ~360 once EOS works.
+        const val MAX_FRAMES = 64    // ~5 s of audio
         const val MAX_CHUNK_CHARS = 240   // cap per synthesis unit (latency/memory bound)
     }
 

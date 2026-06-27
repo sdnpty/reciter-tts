@@ -141,10 +141,12 @@ class SettingsFragment : Fragment(R.layout.fragment_settings) {
                 val logs = withContext(Dispatchers.IO) {
                     logger.getLatestLogs(100).joinToString("\n")
                 }
-                if (_binding != null) {
-                    binding.tvLogContent.text = logs.ifEmpty { getString(R.string.log_empty) }
-                    binding.scrollLogs.post {
-                        binding.scrollLogs.fullScroll(View.FOCUS_DOWN)
+                val b = _binding
+                if (b != null) {
+                    b.tvLogContent.text = logs.ifEmpty { getString(R.string.log_empty) }
+                    b.scrollLogs.post {
+                        // Runs later on the handler; the view may be gone by then.
+                        _binding?.scrollLogs?.fullScroll(View.FOCUS_DOWN)
                     }
                 }
                 delay(3000)
