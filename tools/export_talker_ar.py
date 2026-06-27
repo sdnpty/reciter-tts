@@ -539,21 +539,61 @@ def export_speaker_encoder(model):
     print(f"  speaker_encoder.onnx: {os.path.getsize(path)/1024**2:.1f} MB  meta={meta}")
 
     # Validate against the model's own speaker-prompt path if it's reachable.
+    # The qwen-tts API has shifted across versions (the x_vector_only_mode kwarg
+    # was removed), so call generate_speaker_prompt defensively and dig a
+    # [*,1024] vector out of whatever it returns.
     try:
         import onnxruntime as ort, numpy as np
-        gsp = getattr(model, "generate_speaker_prompt", None) or \
-              getattr(model_wrapper, "generate_speaker_prompt", None)  # noqa: F821
-        if gsp is not None:
-            with torch.no_grad():
-                gt = gsp(dummy, x_vector_only_mode=True)
-            gt = (gt[0] if isinstance(gt, (tuple, list)) else gt).reshape(-1).numpy()
+        gt = native_speaker_xvector(model, dummy, 1024)
+        if gt is not None:
             sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
             ov = sess.run(None, {"waveform": dummy.numpy()})[0].reshape(-1)
             n = min(len(gt), len(ov))
             print(f"  VALIDATION max|onnx-prompt| = {np.abs(gt[:n]-ov[:n]).max():.3e} "
                   f"(small = fbank+encoder reproduces generate_speaker_prompt)")
+        else:
+            print("  (speaker-prompt validation skipped: no usable generate_speaker_prompt)")
     except Exception as e:
         print(f"  (speaker-prompt validation skipped: {e})")
+
+
+def native_speaker_xvector(model, wav, dim=1024):
+    """Return the model's native speaker x-vector for a [1,N] @16k waveform, or
+    None. Tolerant of API drift: tries generate_speaker_prompt with a few
+    signatures and extracts the first [*,dim] tensor from the result."""
+    import torch, inspect
+    mw = globals().get("model_wrapper", None)
+    fn = getattr(model, "generate_speaker_prompt", None) or \
+        (getattr(mw, "generate_speaker_prompt", None) if mw is not None else None)
+    if fn is None:
+        return None
+
+    def extract(out):
+        cands = []
+        def walk(o):
+            if isinstance(o, torch.Tensor):
+                cands.append(o)
+            elif isinstance(o, (tuple, list)):
+                for x in o: walk(x)
+            elif isinstance(o, dict):
+                for x in o.values(): walk(x)
+        walk(out)
+        for t in cands:
+            if dim in tuple(t.shape):
+                return t.reshape(-1)[:dim].float().cpu().numpy()
+        return cands[0].reshape(-1)[:dim].float().cpu().numpy() if cands else None
+
+    for call in (lambda: fn(wav), lambda: fn(wav, sample_rate=16000),
+                 lambda: fn(wav[0]), lambda: fn(wav.numpy())):
+        try:
+            with torch.no_grad():
+                out = call()
+            v = extract(out)
+            if v is not None:
+                return v
+        except Exception:
+            continue
+    return None
 
 
 def write_manifest():
