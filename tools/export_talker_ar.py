@@ -28,24 +28,33 @@ def _talker(model):
     return model.talker
 
 
-class TextCond(torch.nn.Module):
-    """text ids -> text_projection(text_embedding(ids)). Matches how generate()
-    builds trailing_text_hidden and the tts_bos/eos/pad embeds.
+import json, numpy as np
 
-    The raw text_embedding (151936 x H) plus the projection blows past the 2 GiB
-    protobuf limit during export. Since cond = projection(embedding(id)) is a
-    pure lookup, we PRE-COMPUTE the combined table projection(embedding.weight)
-    once and export it as a single Embedding — mathematically identical, and a
-    single 151936 x H_out table stays under 2 GiB.
-    """
-    def __init__(self, talker):
-        super().__init__()
-        with torch.no_grad():
-            w = talker.model.text_embedding.weight.float()        # [V, H_in]
-            combined = talker.text_projection(w)                  # [V, H_out]
-        self.table = torch.nn.Embedding.from_pretrained(combined.contiguous())
-    def forward(self, text_ids):
-        return self.table(text_ids)
+
+def export_text_cond_table(model):
+    """text cond is a pure lookup: cond[id] = text_projection(text_embedding[id]).
+    The combined table is far too big for an ONNX proto (>2 GiB protobuf limit),
+    so we pre-compute it and save it as a raw fp16 binary + a small meta json.
+    On device Kotlin gathers rows directly (and slices tts_bos/eos/pad by id)."""
+    talker = _talker(model)
+    with torch.no_grad():
+        w = talker.model.text_embedding.weight.float()            # [V, H_in]
+        combined = talker.text_projection(w).contiguous()         # [V, H_out]
+    V, H = combined.shape
+    arr = combined.to(torch.float16).cpu().numpy()
+    bin_path = f"{OUT}/text_cond_table.f16"
+    arr.tofile(bin_path)
+    meta = {
+        "rows": int(V), "dim": int(H), "dtype": "float16",
+        "file": "text_cond_table.f16",
+        "tts_bos_token_id": int(getattr(model.config, "tts_bos_token_id", -1)),
+        "tts_eos_token_id": int(getattr(model.config, "tts_eos_token_id", -1)),
+        "tts_pad_token_id": int(getattr(model.config, "tts_pad_token_id", -1)),
+    }
+    with open(f"{OUT}/text_cond_meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+    print(f"  text_cond_table.f16: {os.path.getsize(bin_path)/1024**2:.1f} MB, "
+          f"shape=({V},{H})  meta={meta}")
 
 
 class CodecEmbed(torch.nn.Module):
@@ -55,21 +64,6 @@ class CodecEmbed(torch.nn.Module):
         self.codec_embedding = talker.model.codec_embedding  # Embedding(3072, H)
     def forward(self, codes):
         return self.codec_embedding(codes)
-
-
-def export_text_cond(model):
-    talker = _talker(model)
-    m = TextCond(talker).float().eval()
-    dummy = torch.randint(0, talker.model.text_embedding.num_embeddings, (1, 16), dtype=torch.long)
-    with torch.no_grad():
-        out = m(dummy)
-    path = f"{OUT}/text_cond.onnx"
-    torch.onnx.export(
-        m, (dummy,), path,
-        input_names=["text_ids"], output_names=["cond"],
-        dynamic_axes={"text_ids": {0: "b", 1: "t"}, "cond": {0: "b", 1: "t"}},
-        opset_version=OPSET, do_constant_folding=True)
-    print(f"  text_cond.onnx: {os.path.getsize(path)/1024**2:.1f} MB, cond dim = {tuple(out.shape)}")
 
 
 def export_codec_embed(model):
@@ -88,6 +82,6 @@ def export_codec_embed(model):
 
 if __name__ == "__main__":
     print("=== Stage 1: text_cond + codec_embed ===")
-    export_text_cond(model)     # noqa: F821  (provided by the Colab session)
-    export_codec_embed(model)   # noqa: F821
+    export_text_cond_table(model)   # noqa: F821  (provided by the Colab session)
+    export_codec_embed(model)       # noqa: F821
     print("Done. Next: stage 2 (talker_step / subtalker_step with KV cache).")
