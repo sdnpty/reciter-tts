@@ -155,10 +155,94 @@ def export_talker_logits(model):
         print(f"  validation FAILED: {e}")
 
 
+# ── Stage 2b: KV-cache single-step talker export ─────────────────────────────
+# The model uses torch.func.vmap internally, which the dynamo exporter cannot
+# trace and the legacy tracer bakes seq length for. A single-step export sidesteps
+# both: seq is always 1 (constant, nothing to bake), the legacy tracer unrolls
+# vmap fine (it produced a graph before), and the only dynamic axis is the KV
+# cache length on the past_* tensors. Prefill is done as repeated single steps.
+
+def export_talker_step(model):
+    from transformers.cache_utils import DynamicCache
+    talker = _talker(model)
+    backbone = talker.model
+    codec_head = talker.codec_head
+    n_layers = len(backbone.layers)
+    cfg = backbone.config
+    nkv = getattr(cfg, "num_key_value_heads", getattr(cfg, "num_attention_heads"))
+    hd = getattr(cfg, "head_dim", cfg.hidden_size // cfg.num_attention_heads)
+    print(f"  layers={n_layers} kv_heads={nkv} head_dim={hd}")
+
+    class Step(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.backbone = backbone
+            self.codec_head = codec_head
+            self.n = n_layers
+        def forward(self, inputs_embeds, position_ids, cache_position, *pkv):
+            past = DynamicCache.from_legacy_cache(
+                tuple((pkv[2 * i], pkv[2 * i + 1]) for i in range(self.n)))
+            out = self.backbone(input_ids=None, inputs_embeds=inputs_embeds,
+                                position_ids=position_ids, past_key_values=past,
+                                use_cache=True, cache_position=cache_position,
+                                return_dict=True)
+            logits = self.codec_head(out.last_hidden_state)
+            flat = []
+            for k, v in out.past_key_values.to_legacy_cache():
+                flat += [k, v]
+            return (logits, *flat)
+
+    m = Step().float().eval()
+
+    def make_inputs(L):
+        emb = _det_float(1, 1, 1024)
+        pos = torch.full((3, 1, 1), L, dtype=torch.long)
+        cpos = torch.tensor([L], dtype=torch.long)
+        pkv = []
+        for _ in range(n_layers):
+            pkv += [_det_float(1, nkv, L, hd), _det_float(1, nkv, L, hd)]
+        return (emb, pos, cpos, *pkv)
+
+    args = make_inputs(3)
+    in_names = ["inputs_embeds", "position_ids", "cache_position"]
+    out_names = ["logits"]
+    dyn = {"inputs_embeds": {0: "b"}, "logits": {0: "b"}}
+    for i in range(n_layers):
+        in_names += [f"past_k_{i}", f"past_v_{i}"]
+        out_names += [f"present_k_{i}", f"present_v_{i}"]
+        dyn[f"past_k_{i}"] = {0: "b", 2: "past"}
+        dyn[f"past_v_{i}"] = {0: "b", 2: "past"}
+        dyn[f"present_k_{i}"] = {0: "b", 2: "past1"}
+        dyn[f"present_v_{i}"] = {0: "b", 2: "past1"}
+
+    with torch.no_grad():
+        ref = m(*args)
+    print(f"  torch step logits: {tuple(ref[0].shape)}  present_k0: {tuple(ref[1].shape)}")
+
+    path = f"{OUT}/talker_step.onnx"
+    torch.onnx.export(m, args, path, input_names=in_names, output_names=out_names,
+                      dynamic_axes=dyn, opset_version=OPSET, do_constant_folding=True)
+    print(f"  talker_step.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
+
+    # validate at a DIFFERENT cache length (proves the cache axis is dynamic)
+    try:
+        import onnxruntime as ort, numpy as np
+        sess = ort.InferenceSession(path, providers=["CPUExecutionProvider"])
+        a2 = make_inputs(7)
+        with torch.no_grad():
+            tref = m(*a2)[0].numpy()
+        feed = {in_names[i]: a2[i].numpy() for i in range(len(in_names))}
+        oout = sess.run(None, feed)[0]
+        print(f"  VALIDATION (cache_len=7) max|onnx-torch| = {np.abs(oout - tref).max():.3e} "
+              f"(should be < 1e-3)")
+    except Exception as e:
+        print(f"  validation FAILED: {e}")
+
+
 if __name__ == "__main__":
     print("=== Stage 1: text_cond + codec_embed ===")
     export_text_cond_table(model)   # noqa: F821  (provided by the Colab session)
     export_codec_embed(model)       # noqa: F821
-    print("\n=== Stage 2a: talker_logits (prefill-mode, reuses RoPE) ===")
-    export_talker_logits(model)     # noqa: F821
+    print("\n=== Stage 2b: talker_step (KV-cache, single step) ===")
+    export_talker_step(model)       # noqa: F821
     print("\nDone. Next: subtalker (code_predictor) export + Kotlin AR loop.")
