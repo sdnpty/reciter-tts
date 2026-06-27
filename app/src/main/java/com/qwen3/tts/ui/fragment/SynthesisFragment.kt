@@ -26,6 +26,15 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
     private var exportTts: TextToSpeech? = null
     private var isSynthesizing = false
 
+    /**
+     * Creates a [TextToSpeech] bound to THIS app's own engine (QwenTTSEngine)
+     * instead of the system default (which is usually Google TTS). Without the
+     * explicit engine package the preview always plays Google's voice and never
+     * touches the imported Qwen model.
+     */
+    private fun newAppTts(onInit: (Int) -> Unit): TextToSpeech =
+        TextToSpeech(requireContext(), onInit, requireContext().packageName)
+
     private val viewModel by lazy {
         ViewModelProvider(requireActivity())[TTSViewModel::class.java]
     }
@@ -56,7 +65,7 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         Toast.makeText(requireContext(), R.string.wav_saving, Toast.LENGTH_SHORT).show()
 
         exportTts?.shutdown()
-        exportTts = TextToSpeech(requireContext()) { status ->
+        exportTts = newAppTts { status ->
             if (status != TextToSpeech.SUCCESS) {
                 activity?.runOnUiThread { toastWavFailed() }
                 return@TextToSpeech
@@ -175,7 +184,7 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
 
         tts?.shutdown()
         tts = null
-        tts = TextToSpeech(requireContext()) { status ->
+        tts = newAppTts { status ->
             if (status == TextToSpeech.SUCCESS) {
                 tts?.language = getSelectedLocale()
                 // Prefer the exact model voice matching the selected chip.

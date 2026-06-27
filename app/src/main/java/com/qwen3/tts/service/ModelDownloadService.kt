@@ -85,13 +85,13 @@ class ModelDownloadService : Service() {
         val initialText = if (zipUri != null) {
             isImporting = true
             isDownloading = false
-            currentTitle = "Preparing model import…"
-            "Preparing model import…"
+            currentTitle = "Подготовка импорта модели…"
+            "Подготовка импорта модели…"
         } else {
             isDownloading = true
             isImporting = false
-            currentTitle = "Starting download…"
-            "Starting download…"
+            currentTitle = "Начало загрузки…"
+            "Начало загрузки…"
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -135,7 +135,7 @@ class ModelDownloadService : Service() {
 
     private suspend fun downloadAndExtract(url: String, force: Boolean) = withContext(Dispatchers.IO) {
         if (!url.startsWith("https://")) {
-            throw IllegalArgumentException("Only HTTPS URLs are allowed for model downloads")
+            throw IllegalArgumentException("Разрешены только HTTPS-ссылки для загрузки моделей")
         }
         logger.i(TAG, "Starting model download")
 
@@ -191,7 +191,7 @@ class ModelDownloadService : Service() {
                             currentDownloaded = downloaded
                             currentTotal = totalSize
                             currentSpeed = speed
-                            currentTitle = "Downloading..."
+                            currentTitle = "Загрузка…"
 
                             logger.logDownload(url, downloaded, totalSize, speed)
                             updateNotification(percent, downloaded, totalSize, speed)
@@ -207,7 +207,7 @@ class ModelDownloadService : Service() {
             connection.disconnect()
             logger.i(TAG, "Download complete: ${downloaded / 1024 / 1024} MB")
 
-            updateNotificationText("Extracting models…")
+            updateNotificationText("Распаковка моделей…")
             extractZipStreaming(tempFile, staging)
         } finally {
             tempFile.delete()
@@ -216,7 +216,7 @@ class ModelDownloadService : Service() {
         val slotId = finalizeSlot(staging)
         val missing = ModelConfig.missingOnnxModels(this@ModelDownloadService)
         if (missing.isNotEmpty()) {
-            throw IllegalStateException("Missing ONNX files after extraction: ${missing.joinToString()}")
+            throw IllegalStateException("После распаковки отсутствуют ONNX-файлы: ${missing.joinToString()}")
         }
 
         logger.i(TAG, "Extraction complete into slot '$slotId', all models verified")
@@ -284,7 +284,7 @@ class ModelDownloadService : Service() {
         val missing = ModelConfig.missingOnnxModels(this@ModelDownloadService)
         if (missing.isNotEmpty()) {
             logger.w(TAG, "Still missing models after import: ${missing.joinToString()}")
-            throw IllegalStateException("Import finished but some models are missing: ${missing.joinToString()}")
+            throw IllegalStateException("Импорт завершён, но часть моделей отсутствует: ${missing.joinToString()}")
         }
 
         logger.i(TAG, "Local model import complete into slot '$slotId' and verified")
@@ -391,7 +391,7 @@ class ModelDownloadService : Service() {
                     } catch (e: OutOfMemoryError) {
                         outFile.delete()
                         logger.e(TAG, "OOM while extracting ${entry.name}", Exception(e))
-                        throw Exception("Out of memory extracting ${entry.name}. Free up device storage and try again.")
+                        throw Exception("Недостаточно памяти при распаковке ${entry.name}. Освободите место и попробуйте снова.")
                     } catch (e: Exception) {
                         outFile.delete()
                         logger.e(TAG, "Failed to extract ${entry.name}: ${e.message}", e)
@@ -408,12 +408,12 @@ class ModelDownloadService : Service() {
                         currentPercent = percent
                         currentDownloaded = extracted.toLong()
                         currentTotal = totalEntries.toLong()
-                        currentTitle = "Importing models… $extracted / $totalEntries"
+                        currentTitle = "Импорт моделей… $extracted / $totalEntries"
                         updateNotification(currentTitle, percent, 100)
                         onProgress?.invoke(percent, extracted.toLong(), totalEntries.toLong(), 0f)
                     } else {
                         // Indeterminate progress
-                        currentTitle = "Importing models… $extracted files"
+                        currentTitle = "Импорт моделей… $extracted файлов"
                         updateNotificationText(currentTitle)
                         onProgress?.invoke(0, extracted.toLong(), 0L, 0f)
                     }
@@ -471,10 +471,10 @@ class ModelDownloadService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Model Downloads",
+                "Загрузка моделей",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Downloads ONNX model files for Reciter TTS"
+                description = "Загрузка ONNX-моделей для Reciter TTS"
                 setShowBadge(false)
             }
             val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -489,7 +489,7 @@ class ModelDownloadService : Service() {
         )
 
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Reciter TTS — Downloading Models")
+            .setContentTitle("Reciter TTS — загрузка моделей")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setProgress(max, progress, progress == 0 && max == 0)

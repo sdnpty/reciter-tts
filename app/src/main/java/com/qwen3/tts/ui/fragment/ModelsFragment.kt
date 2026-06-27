@@ -209,8 +209,8 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
         var allPresent = true
         val sb = StringBuilder()
 
-        sb.appendLine("model: ${profile.displayName}")
-        if (installed.size > 1) sb.appendLine("(${installed.size} installed — pick in Settings)")
+        sb.appendLine("модель: ${profile.displayName}")
+        if (installed.size > 1) sb.appendLine("(установлено ${installed.size} — выбор в Настройках)")
         sb.appendLine()
 
         for (model in profile.modelFiles) {
@@ -220,11 +220,11 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
 
             val shortName = model.filename.removeSuffix("_android.onnx").removeSuffix(".onnx")
             if (file.exists()) {
-                val check = if (sizeMb >= model.expectedSizeMb * 0.8) "OK" else "WARN"
+                val check = if (sizeMb >= model.expectedSizeMb * 0.8) "OK" else "!!"
                 sb.appendLine("$check  $shortName: ${df.format(sizeMb)} MB")
             } else {
                 allPresent = false
-                sb.appendLine("--  $shortName: MISSING")
+                sb.appendLine("--  $shortName: ОТСУТСТВУЕТ")
             }
         }
 
@@ -233,14 +233,14 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
             if (file.exists()) {
                 sb.appendLine("OK  $filename")
             } else {
-                sb.appendLine("--  $filename (optional)")
+                sb.appendLine("--  $filename (опционально)")
             }
         }
 
         sb.appendLine()
         sb.appendLine(
-            if (tokenizerAvailable()) "OK  tokenizer: BPE (vocab+merges)"
-            else "!!  tokenizer: byte fallback — add vocab.json + merges.txt"
+            if (tokenizerAvailable()) "OK  токенайзер: BPE (vocab+merges)"
+            else "!!  токенайзер: байтовый режим — добавьте vocab.json + merges.txt"
         )
 
         binding.tvModelStatus.text = sb.toString()
