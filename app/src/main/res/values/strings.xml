@@ -123,6 +123,9 @@
     <string name="record_saved">Голос сохранён: %1$s</string>
     <string name="voice_cloned">Голос склонирован и готов к синтезу</string>
     <string name="record_failed">Не удалось записать голос</string>
+    <string name="btn_upload_voice">Загрузить аудио</string>
+    <string name="upload_decoding">Обработка аудио…</string>
+    <string name="upload_failed">Не удалось обработать аудиофайл</string>
     <string name="dialog_voice_name">Имя голоса</string>
     <string name="dialog_save">Сохранить</string>
     <string name="label_install_models">Установка моделей</string>

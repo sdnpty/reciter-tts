@@ -161,6 +161,22 @@
                     app:iconTint="@color/text_accent"
                     app:strokeColor="@color/glass_border"
                     app:strokeWidth="1dp" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnUploadVoice"
+                    style="@style/Widget.Material3.Button.OutlinedButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="52dp"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/btn_upload_voice"
+                    android:textColor="@color/text_accent"
+                    android:textSize="14sp"
+                    app:cornerRadius="16dp"
+                    app:icon="@drawable/ic_share_24"
+                    app:iconGravity="textStart"
+                    app:iconTint="@color/text_accent"
+                    app:strokeColor="@color/glass_border"
+                    app:strokeWidth="1dp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 

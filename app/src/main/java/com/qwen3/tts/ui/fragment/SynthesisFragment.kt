@@ -43,6 +43,11 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
             else Toast.makeText(requireContext(), R.string.record_permission_needed, Toast.LENGTH_SHORT).show()
         }
 
+    private val pickAudio =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) importAudio(uri)
+        }
+
     /**
      * Creates a [TextToSpeech] bound to THIS app's own engine (QwenTTSEngine)
      * instead of the system default (which is usually Google TTS). Without the
@@ -71,6 +76,33 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         binding.btnSetDefault.setOnClickListener { openTtsSettings() }
         binding.btnSaveWav.setOnClickListener { saveToWav() }
         binding.btnRecordVoice.setOnClickListener { onRecordClicked() }
+        binding.btnUploadVoice.setOnClickListener {
+            pickAudio.launch(arrayOf("audio/*"))
+        }
+    }
+
+    /**
+     * Decodes a user-picked audio file to a 16 kHz mono WAV off the UI thread and
+     * reuses the same naming/cloning flow as a mic recording. Lets the user try a
+     * cloned voice from an existing clip instead of recording one live.
+     */
+    private fun importAudio(uri: android.net.Uri) {
+        val ctx = requireContext().applicationContext
+        Toast.makeText(ctx, R.string.upload_decoding, Toast.LENGTH_SHORT).show()
+        val tmp = File(ctx.cacheDir, "voice_import_${System.currentTimeMillis()}.wav")
+        Thread {
+            val seconds = com.qwen3.tts.util.AudioImport.decodeToWav16kMono(ctx, uri, tmp)
+            activity?.runOnUiThread {
+                if (!isAdded) return@runOnUiThread
+                if (seconds < 1.5f) {
+                    tmp.delete()
+                    Toast.makeText(requireContext(), R.string.upload_failed, Toast.LENGTH_SHORT).show()
+                } else {
+                    pendingClip = tmp
+                    promptVoiceName()
+                }
+            }
+        }.start()
     }
 
     // ── Mic recording → custom voice ──────────────────────────────
