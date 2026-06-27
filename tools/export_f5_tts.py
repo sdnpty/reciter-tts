@@ -41,10 +41,14 @@ OUT = "/content/f5-onnx/android"
 os.makedirs(OUT, exist_ok=True)
 OPSET = 17
 
-# Checkpoint + vocab. Override for a Russian finetune.
-MODEL_CKPT = os.environ.get("F5_CKPT", "")          # path to .safetensors/.pt, or "" to auto-download base
-VOCAB_FILE = os.environ.get("F5_VOCAB", "")          # path to vocab.txt matching the checkpoint
-MODEL_NAME = os.environ.get("F5_NAME", "F5TTS_v1_Base")
+# Checkpoint + vocab. Defaults to the documented Russian finetune
+# (hotstone228/F5-TTS-Russian, base F5TTS_Base, cc-by-nc-4.0). Override via env.
+HF_REPO    = os.environ.get("F5_HF_REPO", "hotstone228/F5-TTS-Russian")
+HF_CKPT    = os.environ.get("F5_HF_CKPT", "model_last.safetensors")
+HF_VOCAB   = os.environ.get("F5_HF_VOCAB", "vocab.txt")
+MODEL_CKPT = os.environ.get("F5_CKPT", "")          # local path overrides HF_REPO
+VOCAB_FILE = os.environ.get("F5_VOCAB", "")          # local path overrides HF_REPO
+MODEL_NAME = os.environ.get("F5_NAME", "F5TTS_Base")
 
 # Reference voice(s) to bake: (voice_id, locale, display, ref_wav_path, ref_text).
 # The ref text MUST be the exact transcript of the ref wav (F5 is zero-shot).
@@ -72,18 +76,18 @@ def load_f5():
     from f5_tts.model import DiT
     from importlib.resources import files
 
+    from huggingface_hub import hf_hub_download
     if VOCAB_FILE:
         vocab_path = VOCAB_FILE
     else:
-        vocab_path = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
-    # F5TTS_v1_Base architecture hyper-params.
+        try:
+            vocab_path = hf_hub_download(HF_REPO, HF_VOCAB)
+        except Exception:
+            vocab_path = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
+    # F5TTS_Base architecture hyper-params (hotstone228 Russian is F5TTS_Base).
     model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2,
                      text_dim=512, conv_layers=4)
-    if MODEL_CKPT:
-        ckpt = MODEL_CKPT
-    else:
-        from huggingface_hub import hf_hub_download
-        ckpt = hf_hub_download("SWivid/F5-TTS", "F5TTS_v1_Base/model_1250000.safetensors")
+    ckpt = MODEL_CKPT or hf_hub_download(HF_REPO, HF_CKPT)
     model = load_model(DiT, model_cfg, ckpt, vocab_file=vocab_path).eval()
     vocoder = load_vocoder().eval()
     # vocab_char_map: token(str) -> id(int)
