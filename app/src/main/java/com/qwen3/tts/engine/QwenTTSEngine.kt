@@ -107,6 +107,7 @@ class QwenTTSEngine : TextToSpeechService() {
                     val b = when (profile.architecture.lowercase()) {
                         "qwen3-codec-ar", "qwen3-tts-ar" -> buildArEngine(useNnapi)
                         "qwen3-codec", "" -> buildQwenEngine(profile, useNnapi)
+                        "f5" -> buildF5Engine()
                         "vits" -> buildVitsEngine(profile)
                         "cosyvoice" -> CosyVoiceInferenceEngine(this, profile, profile.sampleRateHz)
                         else -> {
@@ -141,6 +142,10 @@ class QwenTTSEngine : TextToSpeechService() {
         com.qwen3.tts.engine.inference.QwenArEngine.create(
             this, ModelConfig.activeModelDir(this), useNnapi
         )?.also { it.onLog = { m -> logger.i("QwenAr", m) } }
+
+    /** F5-TTS (non-autoregressive flow-matching: DiT ODE loop + Vocos). */
+    private fun buildF5Engine(): SpeechSynthesizer? =
+        com.qwen3.tts.engine.inference.F5InferenceEngine.create(this, ModelConfig.activeModelDir(this))
 
     private fun buildQwenEngine(profile: ModelConfig.ModelProfile, useNnapi: Boolean): SpeechSynthesizer {
         val byRole = profile.modelFiles.associateBy { it.role }

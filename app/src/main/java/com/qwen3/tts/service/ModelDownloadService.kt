@@ -343,14 +343,16 @@ class ModelDownloadService : Service() {
                     // Extract ONNX models, tokenizer files, the model manifest, and
                     // the AR data files (raw fp16 tables, baked voices, configs).
                     val isOnnx = baseName.endsWith(".onnx", ignoreCase = true)
-                    val isTokenizer = baseName == "vocab.json" || baseName == "merges.txt"
                     val isManifest = baseName == ModelConfig.MANIFEST_FILE
-                    val isArData = baseName.endsWith(".f16", ignoreCase = true) ||
+                    // Keep model weights/tables plus any small config/vocab files.
+                    // Generalised from a fixed name list so new architectures
+                    // (f5_config.json, f5_voices.json, vocab.txt, …) aren't dropped.
+                    val isData = baseName.endsWith(".f16", ignoreCase = true) ||
                         baseName.endsWith(".bin", ignoreCase = true) ||
-                        baseName == "voices.json" || baseName == "ar_config.json" ||
-                        baseName == "text_cond_meta.json"
+                        baseName.endsWith(".json", ignoreCase = true) ||
+                        baseName.endsWith(".txt", ignoreCase = true)
 
-                    if (!isOnnx && !isTokenizer && !isManifest && !isArData) {
+                    if (!isOnnx && !isManifest && !isData) {
                         logger.d(TAG, "Skipping non-relevant file: ${entry.name}")
                         zis.closeEntry()
                         entry = zis.nextEntry
