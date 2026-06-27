@@ -2,76 +2,80 @@
 
 The single-pass `input_ids(text) → logits` talker export is architecturally
 wrong: the talker is a 28-layer autoregressive decoder over the **codec**
-vocabulary (embedding has 3072 entries, not the text vocab). Feeding text token
-ids crashes ONNX Runtime:
+vocabulary. Feeding text ids crashes ONNX Runtime (`/embed/Gather`, idx out of
+`[0,3071]`). Below is the REAL generation contract, taken from
+`Qwen3TTSModel.generate` and `Qwen3TTSTalkerForCausalLM.forward`.
+
+## Modules
+
+- `talker.model.text_embedding` — Embedding(151936) for text ids.
+- `talker.text_projection` — projects text embeddings into the talker hidden
+  space (used for the text condition AND for tts_bos/eos/pad embeds).
+- `talker.model.codec_embedding` — Embedding(3072) for codebook-0 codes.
+- `talker.codec_head` — Linear → codebook-0 logits (3072).
+- `talker.code_predictor` — the **subtalker** (5 layers) with its own 15
+  `codec_embedding[i]` (Embedding(2048) each) and an autoregressive `generate`.
+
+## Per-frame talker step (the hard part)
 
 ```
-Gather '/embed/Gather': idx=78910 must be within [-3072, 3071]
+last_id_hidden = codec_embedding(code0)                       # [B,1,H]
+# subtalker is itself autoregressive (15 inner steps, own KV cache + sampling):
+pred = code_predictor.generate(
+        inputs_embeds = cat(past_hidden, last_id_hidden),
+        max_new_tokens = 15, do_sample, top_p, top_k, temperature)
+codes_1_15 = pred.sequences                                   # [B,15]
+codec_hiddens = [last_id_hidden] +
+                [code_predictor.codec_embedding[i](codes_1_15[:,i]) for i in 0..14]
+inputs_embeds = sum(codec_hiddens)                            # [B,1,H]
+# text condition:
+inputs_embeds += (trailing_text_hidden[:, step] if step < T_text else tts_pad_embed)
+# custom 3D RoPE:
+position_ids, rope_deltas = get_rope_index(attention_mask)    # 3D positions
+out = model(inputs_embeds, past_key_values, position_ids, cache_position, use_cache)
+logits = codec_head(out.last_hidden_state)                    # code0 of NEXT frame
+past_hidden = out.last_hidden_state[:, -1:]
 ```
 
-## Real architecture (from the Qwen3-TTS report + reference C/C++ engines)
+Stop when `argmax/sample(logits) == codec_eos_token_id`. Generation also uses
+`repetition_penalty=1.05` and `suppress_tokens` (top-1024 minus EOS).
 
-```
-text → BPE → [text condition]
-                 │
-   ┌─────────────▼──────────────────────────────┐
-   │ Talker (28-layer Qwen3, KV cache)           │  autoregressive, 1 frame/step
-   │   step input  = prev audio code embed (3072)│
-   │                 + text condition (prefill)  │
-   │   step output = codebook-0 logits (3072)    │
-   └─────────────┬──────────────────────────────┘
-                 │ code 0 per frame
-   ┌─────────────▼──────────────┐
-   │ Code Predictor (5 layers)  │  15 sequential passes → codebooks 1..15
-   └─────────────┬──────────────┘
-                 │ 16 codes/frame
-   ┌─────────────▼──────────────┐
-   │ Code2Wav (causal ConvNet)  │  RVQ dequant + 480× upsample → 24 kHz PCM
-   └────────────────────────────┘
-```
+## Prefill (once per utterance)
 
-Stop on the codec EOS token or a max-frames cap.
+Builds the conditioning sequence from:
+`codec_think_*`/`codec_nothink_id` tags, `language_id`, speaker embedding
+(`talker.get_input_embeddings()(spk_id)` or x-vector), and
+`tts_bos/eos/pad = text_projection(text_embedding([bos,eos,pad]))`.
+`trailing_text_hidden = text_projection(text_embedding(text_ids))` is the
+per-step text condition consumed by the generate loop above.
 
-## Required ONNX exports (replaces the current 4-file set)
+## ONNX export set (path A)
 
-1. **text_encoder / embeddings** — produce the text condition (text hidden
-   states) once per utterance. May be the main model's text embedding +
-   `text_projection`.
-2. **talker_step** — single decode step with KV cache:
-   - inputs: `inputs_embeds` (or `audio_code` + internal codec embed),
-     `past_key_values` (28 layers × {k,v}), `cache_position`,
-     and the text-condition tensors (`trailing_text_hidden` / `tts_pad_embed`
-     — exact contract TBD from the generation source).
-   - outputs: `logits` (codebook-0, width 3072), updated `past_key_values`.
-3. **codec_embed** — embeds a generated code (0..3071) back to hidden for the
-   next step (the 3072-wide embedding the Gather error referenced).
-4. **code_predictor_step** — code 0 (+ text/hidden) → residual codebooks 1..15.
-5. **code2wav** — [1, 16, frames] → audio (already correct).
+1. `text_cond.onnx` — text_ids → `text_projection(text_embedding(ids))`
+   (produces trailing_text_hidden, and bos/eos/pad when fed those ids).
+2. `codec_embed.onnx` — code0 (0..3071) → embedding (for last_id_hidden).
+3. `talker_step.onnx` — `inputs_embeds[B,1,H]` + `past_key_values`(28×{k,v}) +
+   `position_ids`(3D) + `cache_position` → `logits[B,1,3072]` + new KV +
+   `past_hidden[B,1,H]`. Excludes the subtalker (exported separately).
+4. `subtalker_step.onnx` — code_predictor single step with its own KV cache,
+   to drive the 15 inner residual codes.
+5. `code2wav.onnx` — [1,16,frames] → audio (already correct).
 
-## Kotlin decoder (QwenInferenceEngine)
+## Hard/risky items (need device iteration)
 
-```
-prefill text condition once
-init empty KV cache (28 layers)
-code = BOS_codec
-frames = []
-repeat up to MAX_FRAMES:
-    h = codec_embed(code)
-    logits, kv = talker_step(h, kv, cache_position, text_cond)
-    code0 = argmax(logits)            # or sampling
-    if code0 == EOS_codec: break
-    fine = code_predictor(code0, ...) # 15 codes
-    frames += [code0, *fine]
-audio = code2wav(stack(frames) as [1,16,T])
-```
+- **Custom 3D RoPE** (`get_rope_index` + `rope_deltas`) must be reproduced in
+  Kotlin exactly, or baked into the ONNX graph with `position_ids` as input.
+- **Nested autoregressive subtalker** with its own KV cache + sampling.
+- **Prefill construction** (think tags / language id / speaker embed / bos-eos-pad).
+- **Sampling** (top_k/top_p/temperature + repetition_penalty + suppress_tokens);
+  greedy argmax is a starting point but may degrade quality.
+- KV-cache ONNX export with dynamic past_key_values for 28 (talker) + 5
+  (subtalker) layers.
 
-## Open items (need the model's generation source to finalize)
+## Scope note
 
-- Exact tensor contract for the text condition: how `trailing_text_hidden`,
-  `tts_pad_embed`, `generation_step` are produced and fed.
-- KV-cache I/O naming/shape for the ONNX `talker_step` export.
-- Start (BOS) and stop (EOS) codec token ids.
-- Whether code_predictor consumes the talker hidden state or the code-0 id.
-
-These come straight from `inspect.getsource(model.generate / talker.forward)`;
-the export is written against that contract.
+This is a large, multi-stage port comparable to the dedicated reference engines
+(`qwen3-tts.cpp`, pure-C `qwen3-tts`). It will require several on-device
+iterations. Staged delivery: (1) text_cond + codec_embed exports, (2) talker_step
++ subtalker_step with KV cache, (3) Kotlin decode loop + RoPE, (4) sampling +
+prefill, (5) quality tuning.
