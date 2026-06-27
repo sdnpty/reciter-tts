@@ -27,4 +27,16 @@ interface SpeechSynthesizer {
 
     /** Release native sessions and resources. */
     fun release()
+
+    /**
+     * Request that an in-flight [synthesize] abort as soon as possible. Default
+     * is a no-op for engines that only stop between callback chunks.
+     */
+    fun requestStop() {}
+
+    /**
+     * Optionally pre-run the model once to prime native arenas, so the first
+     * real request isn't penalized by allocation. Default is a no-op.
+     */
+    fun warmup() {}
 }

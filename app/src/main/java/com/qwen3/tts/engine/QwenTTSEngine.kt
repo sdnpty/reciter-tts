@@ -75,7 +75,7 @@ class QwenTTSEngine : TextToSpeechService() {
             logger.i(TAG, "Loading '${profile.id}' (arch=${profile.architecture}, EP=${if (useNnapi) "NNAPI" else "CPU"})")
 
             val built: SpeechSynthesizer? = when (profile.architecture.lowercase()) {
-                "qwen3-codec-ar", "qwen3-tts-ar" -> buildArEngine()
+                "qwen3-codec-ar", "qwen3-tts-ar" -> buildArEngine(useNnapi)
                 "qwen3-codec", "" -> buildQwenEngine(profile, useNnapi)
                 "vits" -> buildVitsEngine(profile)
                 "cosyvoice" -> CosyVoiceInferenceEngine(this, profile, profile.sampleRateHz)
@@ -86,6 +86,9 @@ class QwenTTSEngine : TextToSpeechService() {
             }
             synthesizer = built
             if (built != null && built.isReady()) {
+                // Prime native arenas BEFORE going live so the first real request
+                // isn't penalized and can't race the warmup on the same sessions.
+                runCatching { built.warmup() }
                 isInitialized.set(true)
                 logger.i(TAG, "Engine initialized successfully")
             } else {
@@ -101,8 +104,10 @@ class QwenTTSEngine : TextToSpeechService() {
     }
 
     /** New autoregressive Qwen3-TTS engine (talker_step/subtalker_step + baked voices). */
-    private fun buildArEngine(): SpeechSynthesizer? =
-        com.qwen3.tts.engine.inference.QwenArEngine.create(this, ModelConfig.activeModelDir(this))
+    private fun buildArEngine(useNnapi: Boolean): SpeechSynthesizer? =
+        com.qwen3.tts.engine.inference.QwenArEngine.create(
+            this, ModelConfig.activeModelDir(this), useNnapi
+        )
 
     private fun buildQwenEngine(profile: ModelConfig.ModelProfile, useNnapi: Boolean): SpeechSynthesizer {
         val byRole = profile.modelFiles.associateBy { it.role }
@@ -141,6 +146,7 @@ class QwenTTSEngine : TextToSpeechService() {
 
     override fun onStop() {
         stopRequested.set(true)
+        synthesizer?.requestStop()
         Log.d(TAG, "onStop: Stop requested")
     }
 

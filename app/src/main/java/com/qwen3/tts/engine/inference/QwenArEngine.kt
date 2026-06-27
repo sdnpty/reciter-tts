@@ -1,6 +1,7 @@
 package com.qwen3.tts.engine.inference
 
 import ai.onnxruntime.OnnxTensor
+import ai.onnxruntime.OnnxValue
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import android.content.Context
@@ -31,6 +32,7 @@ class QwenArEngine(
     modelDir: File,
     private val inputIdsFor: (String) -> IntArray,
     private val voices: Map<String, FloatArray>,   // name -> float32[1024]
+    private val useNnapi: Boolean = false,
 ) : SpeechSynthesizer {
     companion object {
         private const val TAG = "QwenAr"
@@ -41,7 +43,7 @@ class QwenArEngine(
          * tokenizer (`role + encodeForTTS(text) + suffix` from `ar_config.json`).
          * Returns null if the required AR files are missing.
          */
-        fun create(context: Context, modelDir: File): QwenArEngine? {
+        fun create(context: Context, modelDir: File, useNnapi: Boolean = false): QwenArEngine? {
             val required = listOf("talker_step.onnx", "subtalker_step.onnx",
                 "codec_embed.onnx", "code2wav.onnx", "text_cond_table.f16",
                 "subtalker_codec_embed.f16", "subtalker_heads.f16")
@@ -67,7 +69,7 @@ class QwenArEngine(
                 (role.toList() + tokenizer.encodeForTTS(text).toList() + suffix.toList())
                     .toIntArray()
             }
-            return QwenArEngine(modelDir, inputIdsFor, voices)
+            return QwenArEngine(modelDir, inputIdsFor, voices, useNnapi)
         }
 
         /** Reads concatenated float32[1024] x-vectors + their names. */
@@ -118,14 +120,41 @@ class QwenArEngine(
     }
 
     private val env = OrtEnvironment.getEnvironment()
-    private fun opts() = OrtSession.SessionOptions().apply {
+
+    private fun baseOpts() = OrtSession.SessionOptions().apply {
         setIntraOpNumThreads(Runtime.getRuntime().availableProcessors().coerceIn(1, 4))
         setInterOpNumThreads(1)
+        setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
+        setMemoryPatternOptimization(false)   // smaller footprint for AR variable lengths
     }
-    private val talker = env.createSession(File(modelDir, "talker_step.onnx").absolutePath, opts())
-    private val sub = env.createSession(File(modelDir, "subtalker_step.onnx").absolutePath, opts())
-    private val cemb = env.createSession(File(modelDir, "codec_embed.onnx").absolutePath, opts())
-    private val c2w = env.createSession(File(modelDir, "code2wav.onnx").absolutePath, opts())
+
+    /**
+     * Creates a session, trying an accelerated execution provider first (NNAPI
+     * when requested, otherwise XNNPACK — strong on the INT8 matmuls), and
+     * cleanly falling back to plain CPU if the provider isn't available.
+     */
+    private fun createSession(name: String): OrtSession {
+        val accel: ((OrtSession.SessionOptions) -> Unit)? = when {
+            useNnapi -> { o -> o.addNnapi() }
+            else -> { o -> o.addXnnpack(emptyMap()) }
+        }
+        val path = File(File(modelDirPath), name).absolutePath
+        if (accel != null) {
+            try {
+                val o = baseOpts(); accel(o)
+                return env.createSession(path, o)
+            } catch (t: Throwable) {
+                Log.w(TAG, "accelerated EP failed for $name (${t.message}); using CPU")
+            }
+        }
+        return env.createSession(path, baseOpts())
+    }
+
+    private val modelDirPath = modelDir.absolutePath
+    private val talker = createSession("talker_step.onnx")
+    private val sub = createSession("subtalker_step.onnx")
+    private val cemb = createSession("codec_embed.onnx")
+    private val c2w = createSession("code2wav.onnx")
 
     private val textCond = RandomAccessFile(File(modelDir, "text_cond_table.f16"), "r")
     private val subEmb = loadF16(File(modelDir, "subtalker_codec_embed.f16"), GROUPS * 2048 * H) // [15*2048*1024]
@@ -165,12 +194,29 @@ class QwenArEngine(
     private fun codecEmbed(code: Int): FloatArray {
         val t = tl(longArrayOf(code.toLong()), 1, 1)
         val r = cemb.run(mapOf("codes" to t))
-        @Suppress("UNCHECKED_CAST")
-        val out = (r[0].value as Array<Array<FloatArray>>)[0][0]
+        val out = readRow(r[0])
         r.close(); t.close(); return out
     }
 
     private fun emptyKv(n: Int) = Array(2 * n) { t1(FloatArray(0), 1, KVH.toLong(), 0, HD.toLong()) }
+
+    /** Copy a [1,1,*] tensor's single row into a FloatArray (no nested arrays). */
+    private fun readRow(v: OnnxValue): FloatArray {
+        val fb = (v as OnnxTensor).floatBuffer
+        val out = FloatArray(fb.remaining())
+        fb.get(out)
+        return out
+    }
+
+    /** Re-wrap an ORT-owned present-KV tensor into our own (bulk buffer copy). */
+    private fun copyKv(v: OnnxValue): OnnxTensor {
+        val ot = v as OnnxTensor
+        val shape = ot.info.shape           // [1,KVH,L,HD]
+        val fb = ot.floatBuffer
+        val buf = FloatArray(fb.remaining())
+        fb.get(buf)
+        return OnnxTensor.createTensor(env, FloatBuffer.wrap(buf), shape)
+    }
 
     /** talker step → (logits, hidden, newKv). Closes the old kv tensors. */
     private fun talkerStep(emb: FloatArray, pos: Int, kv: Array<OnnxTensor>): Triple<FloatArray, FloatArray, Array<OnnxTensor>> {
@@ -180,24 +226,12 @@ class QwenArEngine(
         feed["cache_position"] = tl(longArrayOf(pos.toLong()), 1)
         for (i in 0 until TALKER_LAYERS) { feed["past_k_$i"] = kv[2 * i]; feed["past_v_$i"] = kv[2 * i + 1] }
         val r = talker.run(feed)
-        @Suppress("UNCHECKED_CAST")
-        val logits = (r[0].value as Array<Array<FloatArray>>)[0][0]
-        @Suppress("UNCHECKED_CAST")
-        val hidden = (r[1].value as Array<Array<FloatArray>>)[0][0]
-        val newKv = Array(2 * TALKER_LAYERS) { r[2 + it].value.let { v -> @Suppress("UNCHECKED_CAST") (v as Array<Array<Array<FloatArray>>>); copyKv(v) } }
+        val logits = readRow(r[0])
+        val hidden = readRow(r[1])
+        val newKv = Array(2 * TALKER_LAYERS) { copyKv(r[2 + it]) }
         r.close(); feed["inputs_embeds"]!!.close(); feed["position_ids"]!!.close(); feed["cache_position"]!!.close()
         kv.forEach { it.close() }
         return Triple(logits, hidden, newKv)
-    }
-
-    // present kv come back as ORT-managed; re-wrap into our own tensors for the next call
-    private fun copyKv(v: Any): OnnxTensor {
-        @Suppress("UNCHECKED_CAST")
-        val a = v as Array<Array<Array<FloatArray>>>   // [1,KVH,L,HD]
-        val L = a[0][0].size
-        val buf = FloatArray(KVH * L * HD); var p = 0
-        for (h in 0 until KVH) for (l in 0 until L) for (d in 0 until HD) buf[p++] = a[0][h][l][d]
-        return t1(buf, 1, KVH.toLong(), L.toLong(), HD.toLong())
     }
 
     private fun subStep(emb: FloatArray, pos: Int, kv: Array<OnnxTensor>): Pair<FloatArray, Array<OnnxTensor>> {
@@ -207,9 +241,8 @@ class QwenArEngine(
         feed["cache_position"] = tl(longArrayOf(pos.toLong()), 1)
         for (i in 0 until SUB_LAYERS) { feed["past_k_$i"] = kv[2 * i]; feed["past_v_$i"] = kv[2 * i + 1] }
         val r = sub.run(feed)
-        @Suppress("UNCHECKED_CAST")
-        val hidden = (r[0].value as Array<Array<FloatArray>>)[0][0]
-        val newKv = Array(2 * SUB_LAYERS) { copyKv(r[1 + it].value) }
+        val hidden = readRow(r[0])
+        val newKv = Array(2 * SUB_LAYERS) { copyKv(r[1 + it]) }
         r.close(); feed["inputs_embeds"]!!.close(); feed["position_ids"]!!.close(); feed["cache_position"]!!.close()
         kv.forEach { it.close() }
         return Pair(hidden, newKv)
@@ -266,6 +299,20 @@ class QwenArEngine(
 
     override fun isReady(): Boolean = voices.isNotEmpty()
 
+    @Volatile private var stopRequested = false
+
+    override fun requestStop() { stopRequested = true }
+
+    override fun warmup() {
+        try {
+            stopRequested = false
+            synthesizePcm("привет", voices.keys.firstOrNull() ?: return)
+            Log.i(TAG, "warmup complete")
+        } catch (e: Throwable) {
+            Log.w(TAG, "warmup skipped: ${e.message}")
+        }
+    }
+
     override fun synthesize(
         text: String,
         voiceName: String,
@@ -273,11 +320,13 @@ class QwenArEngine(
         onAudioChunk: (ByteArray?) -> Boolean
     ) {
         try {
+            stopRequested = false
             // Split into sentence-sized chunks so audio starts after the FIRST
             // sentence instead of the whole paragraph, and playback pipelines
             // with generation. Essential for real-time book reading.
             val chunks = splitIntoChunks(text)
             for (chunk in chunks) {
+                if (stopRequested) break
                 var pcm = synthesizePcm(chunk, voiceName)
                 if (speed != 100) pcm = AudioHelper.timeStretch(pcm, speed / 100f, SR)
                 val keepGoing = onAudioChunk(AudioHelper.floatToPcm16(pcm))
@@ -332,6 +381,10 @@ class QwenArEngine(
         var pos = prefill.size; var step = 0
         val frames = ArrayList<IntArray>()
         while (code0 != EOS && frames.size < MAX_FRAMES) {
+            if (stopRequested) {
+                kv.forEach { it.close() }
+                return if (frames.isEmpty()) FloatArray(0) else code2wav(frames)
+            }
             val lastId = codecEmbed(code0)
             // subtalker
             var skv = emptyKv(SUB_LAYERS)
@@ -356,7 +409,7 @@ class QwenArEngine(
         }
         kv.forEach { it.close() }
         Log.i(TAG, "generated ${frames.size} frames")
-        return code2wav(frames)
+        return if (frames.isEmpty()) FloatArray(0) else code2wav(frames)
     }
 
     private fun code2wav(frames: List<IntArray>): FloatArray {
@@ -365,8 +418,7 @@ class QwenArEngine(
         for (f in 0 until t) for (q in 0 until 16) codes[q * t + f] = frames[f][q].toLong()
         val ct = tl(codes, 1, 16, t.toLong())
         val r = c2w.run(mapOf("codec_tokens" to ct))
-        @Suppress("UNCHECKED_CAST")
-        val audio = (r[0].value as Array<Array<FloatArray>>)[0][0]
+        val audio = readRow(r[0])
         r.close(); ct.close()
         return audio
     }
