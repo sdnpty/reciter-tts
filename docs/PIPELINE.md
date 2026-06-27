@@ -3,7 +3,8 @@
 The whole chain (text → prefill → autoregressive codec generation → code2wav →
 24 kHz audio) is reproduced purely from exported ONNX + raw tables and matches
 PyTorch `model.generate` **bit-exact** (codes 100%, audio identical). Voices are
-baked x-vectors (no on-device cloning in the prototype).
+baked x-vectors from Russian reference clips; the app can also record new
+reference clips from the mic (see §6) to add user voices on-device.
 
 ## 1. Build the model files (Google Colab, GPU)
 
@@ -33,15 +34,17 @@ Outputs (the on-device model set):
 | `subtalker_codec_embed.f16` | [15,2048,1024] residual embeddings |
 | `subtalker_heads.f16` | [15,2048,1024] residual head weights (no bias) |
 
-Quantize the three big ONNX to INT8 for the device (`onnxruntime.quantization.quantize_dynamic`,
-QInt8, per_channel for talker) → ~430/80/210 MB.
+The three big ONNX are quantized to INT8 automatically at the end of
+`export_talker_ar.py` (`quantize_for_android()`, QInt8, per_channel for the
+talker) → ~430/80/210 MB, cutting the set from ~1.7 GB to ~700 MB.
 
 ## 2. Bake voices (x-vector path)
 
-For each reference clip (CMU ARCTIC bdl/jmk/ksp male, slt female — free):
-`generate_voice_clone(..., x_vector_only_mode=True)` and capture
-`model.generate_speaker_prompt` output = a 1024-d x-vector. Save
-`baked_voices.npz {name: float32[1024]}`. See `tools/` cells in the session.
+For each Russian reference clip (3–10 s clean speech; the file name becomes the
+voice name): `generate_speaker_prompt(..., x_vector_only_mode=True)` = a 1024-d
+x-vector. Save them concatenated as `baked_voices.bin` + `voices.json`. The
+Colab notebook `tools/qwen3_tts_export_colab.ipynb` does this (cells 4–5) and
+lets you upload your own Russian clips.
 
 ## 3. On-device algorithm (ported in QwenArEngine.kt)
 
@@ -95,4 +98,13 @@ role_tokens   = [151644, 77091, 198]                 # <|im_start|>assistant\n
 suffix_tokens = [151645, 198, 151644, 77091, 198]    # <|im_end|>\n<|im_start|>assistant\n
 inputIdsFor(text) = role_tokens + Qwen3Tokenizer.encodeForTTS(text) + suffix_tokens
 ```
-Voices baked (CMU ARCTIC): male_us(bdl), male_ca(jmk), male_in(ksp), female_us(slt).
+Voices baked: Russian reference clips (one x-vector each, named by file).
+
+## 6. On-device voice cloning (mic)
+
+The app records a 16 kHz mono reference clip (`VoiceRecorder`), stores it via
+`CustomVoiceStore` under `filesDir/custom_voices/<id>.wav`, and shows it as a
+voice chip on the Synthesis tab. When the AR engine (`QwenArEngine`) is wired
+into the runtime, the speaker encoder turns each stored clip into an x-vector at
+load time, so user voices behave like baked ones. Until then the clips are
+persisted losslessly.
