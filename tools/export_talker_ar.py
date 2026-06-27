@@ -186,11 +186,12 @@ def export_talker_step(model):
                                 position_ids=position_ids, past_key_values=past,
                                 use_cache=True, cache_position=cache_position,
                                 return_dict=True)
-            logits = self.codec_head(out.last_hidden_state)
+            hidden = out.last_hidden_state
+            logits = self.codec_head(hidden)
             flat = []
             for k, v in out.past_key_values.to_legacy_cache():
                 flat += [k, v]
-            return (logits, *flat)
+            return (logits, hidden, *flat)
 
     m = Step().float().eval()
 
@@ -205,7 +206,7 @@ def export_talker_step(model):
 
     args = make_inputs(3)
     in_names = ["inputs_embeds", "position_ids", "cache_position"]
-    out_names = ["logits"]
+    out_names = ["logits", "hidden"]
     dyn = {"inputs_embeds": {0: "b"}, "logits": {0: "b"}}
     for i in range(n_layers):
         in_names += [f"past_k_{i}", f"past_v_{i}"]
@@ -321,6 +322,10 @@ def export_subtalker(model):
     ce.to(torch.float16).cpu().numpy().tofile(f"{OUT}/subtalker_codec_embed.f16")
     hw.to(torch.float16).cpu().numpy().tofile(f"{OUT}/subtalker_heads.f16")
     print(f"  subtalker_codec_embed.f16: {tuple(ce.shape)}  subtalker_heads.f16: {tuple(hw.shape)}")
+    if cp.lm_head[0].bias is not None:
+        hb = torch.stack([cp.lm_head[i].bias.detach() for i in range(ng)])  # [G,2048]
+        hb.to(torch.float16).cpu().numpy().tofile(f"{OUT}/subtalker_heads_bias.f16")
+        print(f"  subtalker_heads_bias.f16: {tuple(hb.shape)}")
 
     try:
         import onnxruntime as ort
