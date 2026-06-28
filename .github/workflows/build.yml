@@ -22,6 +22,9 @@ on:
         default: '1.26.0'
         type: string
 
+permissions:
+  contents: write   # needed to publish the APK to a Release
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -85,7 +88,21 @@ jobs:
           name: reciter-tts-debug
           # APK is renamed to reciter-tts-v<version>-debug.apk, so glob it.
           path: app/build/outputs/apk/debug/*.apk
-          retention-days: 30
+          # Short retention so accumulated artifacts don't exhaust the free
+          # Actions storage quota (which silently drops new artifacts).
+          retention-days: 3
+
+      # Primary delivery: publish the debug APK to a rolling "latest" release.
+      # Artifacts can vanish when the storage quota is hit; a release asset is a
+      # stable, always-downloadable link and a single rolling tag stays small.
+      - name: Publish debug APK to "latest" release
+        if: github.ref == 'refs/heads/main' && (github.event.inputs.build_type == 'debug' || github.event.inputs.build_type == '')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest debug APK
+          prerelease: true
+          files: app/build/outputs/apk/debug/*.apk
 
       - name: Upload Release APK
         if: github.event.inputs.build_type == 'release'
