@@ -109,22 +109,15 @@ class QwenArEngine(
         const val CODEBOOK0 = 2048
         const val VOCAB = 3072
         const val SR = 24000
-        // Talker (code0) decoding. Greedy argmax collapses into a repeating
-        // token loop and never emits EOS, so we sample like the reference model.
-        const val REP_PENALTY = 1.35f
-        const val TEMPERATURE = 0.9f
-        const val TOP_K = 50
-        const val TOP_P = 0.9f
+        // Talker (code0) decoding: greedy argmax + light repetition penalty,
+        // matching the reference decoder (tools/infer_onnx_reference.py).
+        const val REP_PENALTY = 1.05f
         // token ids
         const val TTS_BOS = 151672; const val TTS_EOS = 151673; const val TTS_PAD = 151671
         const val C_PAD = 2148; const val C_BOS = 2149
         const val C_THINK = 2154; const val C_THINK_BOS = 2156; const val C_THINK_EOS = 2157
         const val LANG_RU = 2069
-        // Diagnostic cap: until the model reliably emits EOS, decode only a short
-        // window so the user actually HEARS the output within ~30 s (babble vs.
-        // silence tells us whether the conditioning or the audio path is broken).
-        // Raise back to ~360 once EOS works.
-        const val MAX_FRAMES = 64    // ~5 s of audio
+        const val MAX_FRAMES = 1000   // ~80 s cap; greedy decode should hit EOS first
         const val MAX_CHUNK_CHARS = 240   // cap per synthesis unit (latency/memory bound)
     }
 
@@ -291,53 +284,26 @@ class QwenArEngine(
         return out
     }
 
-    private val rng = java.util.Random()
-
     /**
-     * Picks the next talker token (codebook-0 id, or EOS) by temperature /
-     * top-k / top-p sampling with a count-scaled repetition penalty. Greedy
-     * argmax here makes the codec LM stick on one token forever (never EOS),
-     * so this mirrors the reference model's stochastic decoding. [counts] holds
-     * how many times each id was already emitted, so loops are progressively
-     * discouraged.
+     * Picks the next talker token (codebook-0 id, or EOS) by GREEDY argmax with
+     * a light repetition penalty — exactly the reference decoder
+     * (tools/infer_onnx_reference.py). The earlier sampling was a workaround for
+     * a token loop that was actually caused by wrong speaker x-vectors; with
+     * correct native voices the deterministic argmax path is what produces clean
+     * speech and reaches EOS. [counts] = how many times each id was emitted.
      */
     private fun selectCode0(logits: FloatArray, counts: Map<Int, Int>): Int {
-        // Candidate space: codebook-0 [0,2048) plus EOS. Everything else masked.
-        val m = CODEBOOK0 + 1
-        val ids = IntArray(m) { if (it < CODEBOOK0) it else EOS }
-        val sc = FloatArray(m)
-        for (j in 0 until m) {
-            var v = logits[ids[j]]
-            val c = counts[ids[j]] ?: 0
-            if (c > 0) {
-                val p = Math.pow(REP_PENALTY.toDouble(), c.toDouble()).toFloat()
-                v = if (v > 0) v / p else v * p
-            }
-            sc[j] = v / TEMPERATURE
+        var best = 0; var bv = Float.NEGATIVE_INFINITY
+        fun penalized(id: Int): Float {
+            val v = logits[id]
+            return if ((counts[id] ?: 0) > 0) (if (v > 0) v / REP_PENALTY else v * REP_PENALTY) else v
         }
-        // Top-k: indices of the k highest scores.
-        val order = (0 until m).sortedByDescending { sc[it] }
-        val k = minOf(TOP_K, m)
-        val top = order.subList(0, k)
-        // Softmax over the top-k.
-        val maxv = sc[top[0]]
-        val exps = DoubleArray(k) { Math.exp((sc[top[it]] - maxv).toDouble()) }
-        val sum = exps.sum()
-        // Top-p (nucleus): keep the smallest prefix whose mass ≥ TOP_P.
-        var cum = 0.0; var cut = k
-        for (i in 0 until k) {
-            cum += exps[i] / sum
-            if (cum >= TOP_P) { cut = i + 1; break }
+        for (i in 0 until CODEBOOK0) {
+            val v = penalized(i)
+            if (v > bv) { bv = v; best = i }
         }
-        var massSum = 0.0
-        for (i in 0 until cut) massSum += exps[i]
-        val r = rng.nextDouble() * massSum
-        var acc = 0.0
-        for (i in 0 until cut) {
-            acc += exps[i]
-            if (r <= acc) return ids[top[i]]
-        }
-        return ids[top[cut - 1]]
+        if (penalized(EOS) > bv) best = EOS   // EOS may win over codebook-0
+        return best
     }
 
     // ── prefill ──────────────────────────────────────────────
