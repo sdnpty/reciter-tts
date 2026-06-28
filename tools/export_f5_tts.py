@@ -43,12 +43,12 @@ OPSET = 18
 
 # Checkpoint + vocab. Defaults to the documented Russian finetune
 # (hotstone228/F5-TTS-Russian, base F5TTS_Base, cc-by-nc-4.0). Override via env.
-HF_REPO    = os.environ.get("F5_HF_REPO", "hotstone228/F5-TTS-Russian")
-HF_CKPT    = os.environ.get("F5_HF_CKPT", "model_last.safetensors")
-HF_VOCAB   = os.environ.get("F5_HF_VOCAB", "vocab.txt")
+HF_REPO    = os.environ.get("F5_HF_REPO", "Misha24-10/F5-TTS_RUSSIAN")
+HF_CKPT    = os.environ.get("F5_HF_CKPT", "F5TTS_v1_Base_v2/model_last_inference.safetensors")
+HF_VOCAB   = os.environ.get("F5_HF_VOCAB", "F5TTS_v1_Base/vocab.txt")
 MODEL_CKPT = os.environ.get("F5_CKPT", "")          # local path overrides HF_REPO
 VOCAB_FILE = os.environ.get("F5_VOCAB", "")          # local path overrides HF_REPO
-MODEL_NAME = os.environ.get("F5_NAME", "F5TTS_Base")
+MODEL_NAME = os.environ.get("F5_NAME", "F5TTS_v1_Base")
 
 # Reference voice(s) to bake: (voice_id, locale, display, ref_wav_path, ref_text).
 # The ref text MUST be the exact transcript of the ref wav (F5 is zero-shot).
@@ -84,9 +84,11 @@ def load_f5():
             vocab_path = hf_hub_download(HF_REPO, HF_VOCAB)
         except Exception:
             vocab_path = str(files("f5_tts").joinpath("infer/examples/vocab.txt"))
-    # F5TTS_Base architecture hyper-params (hotstone228 Russian is F5TTS_Base).
-    model_cfg = dict(dim=1024, depth=22, heads=16, ff_mult=2,
-                     text_dim=512, conv_layers=4)
+    # Misha24-10 Russian is F5TTS_v1_Base — load the v1 arch from f5_tts's own
+    # config, otherwise the weights compute wrong (garbled output).
+    from omegaconf import OmegaConf
+    model_cfg = OmegaConf.to_container(OmegaConf.load(
+        str(files("f5_tts").joinpath("configs/F5TTS_v1_Base.yaml"))).model.arch, resolve=True)
     ckpt = MODEL_CKPT or hf_hub_download(HF_REPO, HF_CKPT)
     model = load_model(DiT, model_cfg, ckpt, vocab_file=vocab_path).eval()
     vocoder = load_vocoder().eval()
