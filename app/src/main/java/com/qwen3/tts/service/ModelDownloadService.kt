@@ -350,7 +350,11 @@ class ModelDownloadService : Service() {
                     val isData = baseName.endsWith(".f16", ignoreCase = true) ||
                         baseName.endsWith(".bin", ignoreCase = true) ||
                         baseName.endsWith(".json", ignoreCase = true) ||
-                        baseName.endsWith(".txt", ignoreCase = true)
+                        baseName.endsWith(".txt", ignoreCase = true) ||
+                        // ONNX external-data sidecars (e.g. f5_dit.onnx.data) —
+                        // the model is weightless without them.
+                        baseName.endsWith(".data", ignoreCase = true) ||
+                        baseName.endsWith(".onnx_data", ignoreCase = true)
 
                     if (!isOnnx && !isManifest && !isData) {
                         logger.d(TAG, "Skipping non-relevant file: ${entry.name}")
