@@ -39,7 +39,7 @@ import torch
 # ── Configuration ────────────────────────────────────────────────────────────
 OUT = "/content/f5-onnx/android"
 os.makedirs(OUT, exist_ok=True)
-OPSET = 17
+OPSET = 18
 
 # Checkpoint + vocab. Defaults to the documented Russian finetune
 # (hotstone228/F5-TTS-Russian, base F5TTS_Base, cc-by-nc-4.0). Override via env.
