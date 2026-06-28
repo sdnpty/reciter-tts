@@ -26,6 +26,8 @@
     <string name="status_models_missing">Модели не найдены</string>
     <string name="status_models_missing_details">Отсутствует: %1$s</string>
     <string name="status_models_present">Модели загружены</string>
+    <string name="status_model_ready">%1$s — готова</string>
+    <string name="status_no_model">Модель не установлена</string>
     <string name="status_checking">Проверка моделей…</string>
 
     <!-- Buttons -->

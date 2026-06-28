@@ -245,16 +245,29 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
 
     private fun observeModelStatus() {
         viewModel.modelsReady.observe(viewLifecycleOwner) { ready ->
-            if (ready) {
-                binding.tvEngineStatus.text = getString(R.string.status_models_present)
-                tintStatusDot(R.color.green)
-                binding.btnSynthesize.isEnabled = true
-            } else {
-                val missing = ModelConfig.missingSynthesisModels(requireContext())
-                    .take(3).joinToString()
-                binding.tvEngineStatus.text = getString(R.string.status_models_missing_details, missing)
-                tintStatusDot(R.color.amber)
-                binding.btnSynthesize.isEnabled = false
+            val ctx = requireContext()
+            val hasModel = ModelConfig.installedModels(ctx).isNotEmpty()
+            when {
+                ready -> {
+                    // Show the active (selected) model by name, nothing else.
+                    binding.tvEngineStatus.text =
+                        getString(R.string.status_model_ready, ModelConfig.activeProfile(ctx).displayName)
+                    tintStatusDot(R.color.green)
+                    binding.btnSynthesize.isEnabled = true
+                }
+                !hasModel -> {
+                    // No model installed: the missing-file list is just noise here.
+                    binding.tvEngineStatus.text = getString(R.string.status_no_model)
+                    tintStatusDot(R.color.amber)
+                    binding.btnSynthesize.isEnabled = false
+                }
+                else -> {
+                    // A model is selected but still being installed/loaded.
+                    val missing = ModelConfig.missingSynthesisModels(ctx).take(3).joinToString()
+                    binding.tvEngineStatus.text = getString(R.string.status_models_missing_details, missing)
+                    tintStatusDot(R.color.amber)
+                    binding.btnSynthesize.isEnabled = false
+                }
             }
         }
     }
