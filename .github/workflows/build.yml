@@ -68,6 +68,15 @@ jobs:
           ls -la gradlew
           ls -la gradle/wrapper/
 
+      - name: Download sherpa-onnx AAR
+        run: |
+          mkdir -p app/libs
+          SHERPA_VER=1.13.3
+          URL="https://github.com/k2-fsa/sherpa-onnx/releases/download/v${SHERPA_VER}/sherpa-onnx-static-link-onnxruntime-${SHERPA_VER}.aar"
+          echo "Downloading $URL"
+          curl -fL --retry 4 --retry-delay 3 -o app/libs/sherpa-onnx.aar "$URL"
+          ls -la app/libs/
+
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --no-daemon
 

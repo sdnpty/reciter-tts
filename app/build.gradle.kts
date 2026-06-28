@@ -26,8 +26,8 @@ android {
         minSdk = 27
         targetSdk = 34
         // Bump patch (and versionCode) on every commit: 1.0.1 -> 1.0.2 -> ...
-        versionCode = 10017
-        versionName = "1.0.17"
+        versionCode = 10018
+        versionName = "1.0.18"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -100,10 +100,11 @@ dependencies {
     // Проверено: https://central.sonatype.com/artifact/com.microsoft.onnxruntime/onnxruntime-android
     implementation("com.microsoft.onnxruntime:onnxruntime-android:1.26.0")
 
-    // sherpa-onnx (k2-fsa): Kokoro / Piper-VITS / Matcha TTS with built-in
-    // espeak-ng g2p. Bundles its own ONNX Runtime JNI; the duplicate
-    // libonnxruntime.so is resolved in packaging{} below.
-    implementation("com.k2fsa.sherpa.onnx:sherpa-onnx-android:1.13.2")
+    // sherpa-onnx (k2-fsa): Kokoro / Piper-VITS TTS with built-in espeak-ng g2p.
+    // Not on Maven Central — the AAR is downloaded into app/libs/ by CI (see
+    // .github/workflows/build.yml). The static-link variant compiles ONNX
+    // Runtime into its JNI, so it doesn't clash with microsoft onnxruntime.
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.aar"))))
 
     // Если нужна 1.27.0 — скачай AAR вручную и положи в app/libs/
     // Затем закомментируй строку выше и раскомментируй:

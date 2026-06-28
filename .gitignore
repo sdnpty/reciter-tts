@@ -13,3 +13,4 @@
 !app/debug.keystore
 *.jks
 keystore.properties
+app/libs/*.aar
