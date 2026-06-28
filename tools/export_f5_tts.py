@@ -180,8 +180,27 @@ def export_vocos(vocoder):
         m, (mel,), path, input_names=["mel"], output_names=["waveform"],
         dynamic_axes={"mel": {2: "t"}, "waveform": {1: "n"}},
         opset_version=OPSET, do_constant_folding=True)
+    _fix_scatternd_int64(path)
     print(f"  f5_vocos.onnx: {os.path.getsize(path)/1024**2:.0f} MB")
     return path
+
+
+def _fix_scatternd_int64(path):
+    """dynamo lowers ISTFT to a ScatterND with int32 indices; ORT requires
+    int64 indices, so cast them — otherwise the vocoder won't load on device."""
+    import onnx
+    from onnx import helper, TensorProto
+    m = onnx.load(path)
+    new, patched = [], 0
+    for n in list(m.graph.node):
+        if n.op_type == "ScatterND":
+            co = n.input[1] + "_i64"
+            new.append(helper.make_node("Cast", [n.input[1]], [co], to=TensorProto.INT64))
+            n.input[1] = co; patched += 1
+        new.append(n)
+    del m.graph.node[:]; m.graph.node.extend(new)
+    onnx.save(m, path)
+    print(f"  ScatterND indices cast to int64: {patched}")
 
 
 def quantize(paths):
