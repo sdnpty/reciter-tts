@@ -338,40 +338,25 @@ class ModelDownloadService : Service() {
                 if (!entry.isDirectory) {
                     logger.i(TAG, "Processing ZIP entry: ${entry.name}")
 
-                    val baseName = entry.name.substringAfterLast("/")
+                    // Preserve the directory tree (sherpa-onnx models need the
+                    // espeak-ng-data/ folder intact), but strip a leading "models/"
+                    // wrapper so our archives still land flat at the slot root.
+                    var rel = entry.name.replace('\\', '/').removePrefix("./")
+                    if (rel.startsWith("models/")) rel = rel.removePrefix("models/")
+                    val baseName = rel.substringAfterLast("/")
 
-                    // Extract ONNX models, tokenizer files, the model manifest, and
-                    // the AR data files (raw fp16 tables, baked voices, configs).
-                    val isOnnx = baseName.endsWith(".onnx", ignoreCase = true)
-                    val isManifest = baseName == ModelConfig.MANIFEST_FILE
-                    // Keep model weights/tables plus any small config/vocab files.
-                    // Generalised from a fixed name list so new architectures
-                    // (f5_config.json, f5_voices.json, vocab.txt, …) aren't dropped.
-                    val isData = baseName.endsWith(".f16", ignoreCase = true) ||
-                        baseName.endsWith(".bin", ignoreCase = true) ||
-                        baseName.endsWith(".json", ignoreCase = true) ||
-                        baseName.endsWith(".txt", ignoreCase = true) ||
-                        // ONNX external-data sidecars (e.g. f5_dit.onnx.data) —
-                        // the model is weightless without them.
-                        baseName.endsWith(".data", ignoreCase = true) ||
-                        baseName.endsWith(".onnx_data", ignoreCase = true)
-
-                    if (!isOnnx && !isManifest && !isData) {
-                        logger.d(TAG, "Skipping non-relevant file: ${entry.name}")
+                    // Skip junk and invalid names; keep ALL real files (model
+                    // archives are curated — espeak-ng has extensionless files).
+                    if (rel.isEmpty() || baseName.isEmpty() || rel.contains("..") ||
+                        rel.startsWith("__MACOSX") || baseName.startsWith(".")) {
                         zis.closeEntry()
                         entry = zis.nextEntry
                         continue
                     }
 
-                    // Skip invalid names silently
-                    if (baseName.isEmpty() || baseName.contains("..")) {
-                        zis.closeEntry()
-                        entry = zis.nextEntry
-                        continue
-                    }
-
-                    val destName = renameMap[baseName] ?: baseName
-                    val outFile = File(canonicalDestDir, destName)
+                    val mapped = renameMap[baseName]
+                    val destRel = if (mapped != null) rel.dropLast(baseName.length) + mapped else rel
+                    val outFile = File(canonicalDestDir, destRel)
 
                     // Security: verify destination is inside destDir
                     if (!outFile.canonicalPath.startsWith(canonicalDestDir.canonicalPath)) {

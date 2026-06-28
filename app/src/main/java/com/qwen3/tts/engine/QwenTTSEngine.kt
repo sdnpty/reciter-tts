@@ -104,12 +104,14 @@ class QwenTTSEngine : TextToSpeechService() {
                         sharedSynth = null; sharedKey = null
                     }
                     logger.i(TAG, "Loading '${profile.id}' (arch=${profile.architecture}, EP=${if (useNnapi) "NNAPI" else "CPU"})")
-                    val b = when (profile.architecture.lowercase()) {
-                        "qwen3-codec-ar", "qwen3-tts-ar" -> buildArEngine(useNnapi)
-                        "qwen3-codec", "" -> buildQwenEngine(profile, useNnapi)
-                        "f5" -> buildF5Engine()
-                        "vits" -> buildVitsEngine(profile)
-                        "cosyvoice" -> CosyVoiceInferenceEngine(this, profile, profile.sampleRateHz)
+                    val archLc = profile.architecture.lowercase()
+                    val b = when {
+                        archLc.startsWith("sherpa") -> buildSherpaEngine(profile, archLc)
+                        archLc == "qwen3-codec-ar" || archLc == "qwen3-tts-ar" -> buildArEngine(useNnapi)
+                        archLc == "qwen3-codec" || archLc == "" -> buildQwenEngine(profile, useNnapi)
+                        archLc == "f5" -> buildF5Engine()
+                        archLc == "vits" -> buildVitsEngine(profile)
+                        archLc == "cosyvoice" -> CosyVoiceInferenceEngine(this, profile, profile.sampleRateHz)
                         else -> {
                             logger.e(TAG, "Architecture '${profile.architecture}' is not implemented yet — see docs/MODELS.md")
                             null
@@ -146,6 +148,12 @@ class QwenTTSEngine : TextToSpeechService() {
     /** F5-TTS (non-autoregressive flow-matching: DiT ODE loop + Vocos). */
     private fun buildF5Engine(): SpeechSynthesizer? =
         com.qwen3.tts.engine.inference.F5InferenceEngine.create(this, ModelConfig.activeModelDir(this))
+
+    /** sherpa-onnx (Kokoro / Piper-VITS / Matcha) — fast non-AR, built-in g2p. */
+    private fun buildSherpaEngine(profile: ModelConfig.ModelProfile, arch: String): SpeechSynthesizer? =
+        com.qwen3.tts.engine.inference.SherpaTtsEngine
+            .create(this, ModelConfig.activeModelDir(this), arch)
+            ?.also { it.voiceSidMap = profile.voices.associate { v -> v.id to v.speakerId } }
 
     private fun buildQwenEngine(profile: ModelConfig.ModelProfile, useNnapi: Boolean): SpeechSynthesizer {
         val byRole = profile.modelFiles.associateBy { it.role }
