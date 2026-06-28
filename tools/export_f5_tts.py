@@ -191,16 +191,19 @@ def _fix_scatternd_int64(path):
     import onnx
     from onnx import helper, TensorProto
     m = onnx.load(path)
-    new, patched = [], 0
+    new, casts, patched = [], {}, 0   # one Cast per unique indices tensor
     for n in list(m.graph.node):
         if n.op_type == "ScatterND":
-            co = n.input[1] + "_i64"
-            new.append(helper.make_node("Cast", [n.input[1]], [co], to=TensorProto.INT64))
-            n.input[1] = co; patched += 1
+            idx = n.input[1]
+            if idx not in casts:
+                co = idx + "_i64"
+                new.append(helper.make_node("Cast", [idx], [co], to=TensorProto.INT64))
+                casts[idx] = co
+            n.input[1] = casts[idx]; patched += 1
         new.append(n)
     del m.graph.node[:]; m.graph.node.extend(new)
     onnx.save(m, path)
-    print(f"  ScatterND indices cast to int64: {patched}")
+    print(f"  ScatterND indices cast to int64: {patched} (unique casts: {len(casts)})")
 
 
 def quantize(paths):
