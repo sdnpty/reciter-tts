@@ -29,15 +29,27 @@ class RuNormalizerTest {
 
     @Test fun reciter() = assertEquals("реситер", RuNormalizer.transliterate("reciter"))
 
-    @Test fun `g softens before e`() =
-        assertEquals("джеордже", RuNormalizer.transliterate("george"))
+    @Test fun `g softens before e, silent final e dropped`() =
+        assertEquals("джеорг", RuNormalizer.transliterate("george"))
 
     @Test fun digraphs() = assertEquals("шип", RuNormalizer.transliterate("ship"))
+
+    @Test fun `acronym is spelled with english letter names`() =
+        assertEquals("ю эс би", RuNormalizer.latinWordToRussian("USB"))
+
+    @Test fun `no-vowel word is spelled`() =
+        assertEquals("ти ти эс", RuNormalizer.latinWordToRussian("tts"))
+
+    @Test fun `common word uses pronunciation dictionary`() =
+        assertEquals("виндоус", RuNormalizer.latinWordToRussian("Windows"))
+
+    @Test fun `single letter is a letter name`() =
+        assertEquals("икс", RuNormalizer.latinWordToRussian("x"))
 
     // ── Полная нормализация ──────────────────────────────────────
 
     @Test fun `mixed sentence`() = assertEquals(
-        "Глава пять. реситер ттс читает сто пять страниц",
+        "Глава пять. реситер ти ти эс читает сто пять страниц",
         RuNormalizer.normalize("Глава 5. Reciter TTS читает 105 страниц"))
 
     @Test fun `symbols`() = assertEquals(

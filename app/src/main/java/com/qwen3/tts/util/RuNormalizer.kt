@@ -93,9 +93,42 @@ object RuNormalizer {
 
     // ── Транслитерация латиницы ──────────────────────────────────
 
+    /** Английские названия букв в русской записи — для аббревиатур. */
+    private val LETTER_NAMES = mapOf(
+        'a' to "эй", 'b' to "би", 'c' to "си", 'd' to "ди", 'e' to "и",
+        'f' to "эф", 'g' to "джи", 'h' to "эйч", 'i' to "ай", 'j' to "джей",
+        'k' to "кей", 'l' to "эл", 'm' to "эм", 'n' to "эн", 'o' to "оу",
+        'p' to "пи", 'q' to "кью", 'r' to "ар", 's' to "эс", 't' to "ти",
+        'u' to "ю", 'v' to "ви", 'w' to "дабл ю", 'x' to "икс", 'y' to "вай",
+        'z' to "зет",
+    )
+
+    /** Частые английские слова с устоявшимся русским произношением. */
+    private val EN_WORDS = mapOf(
+        "the" to "зе", "of" to "оф", "and" to "энд", "is" to "из", "are" to "ар",
+        "you" to "ю", "one" to "уан", "two" to "ту", "new" to "нью", "news" to "ньюс",
+        "ok" to "окей", "okay" to "окей", "hello" to "хеллоу", "hi" to "хай",
+        "love" to "лав", "life" to "лайф", "time" to "тайм", "like" to "лайк",
+        "game" to "гейм", "name" to "нейм", "home" to "хоум", "phone" to "фон",
+        "iphone" to "айфон", "google" to "гугл", "windows" to "виндоус",
+        "android" to "андроид", "internet" to "интернет", "online" to "онлайн",
+        "file" to "файл", "site" to "сайт", "mail" to "мейл", "email" to "имейл",
+        "make" to "мейк", "made" to "мейд", "use" to "юз", "user" to "юзер",
+        "mister" to "мистер", "mr" to "мистер", "mrs" to "миссис", "ms" to "мисс",
+        "smart" to "смарт", "start" to "старт", "stop" to "стоп", "world" to "уорлд",
+        "white" to "уайт", "black" to "блэк", "house" to "хаус", "mouse" to "маус",
+        "book" to "бук", "facebook" to "фейсбук", "youtube" to "ютуб",
+        "wifi" to "вай фай", "bluetooth" to "блютус",
+    )
+
+    private val TRIGRAPHS = mapOf(
+        "igh" to "ай", "eau" to "о", "sch" to "ш",
+    )
     private val DIGRAPHS = mapOf(
         "sh" to "ш", "ch" to "ч", "th" to "т", "ph" to "ф", "wh" to "в",
         "oo" to "у", "ee" to "и", "ck" to "к", "qu" to "кв", "kh" to "х",
+        "ay" to "ей", "ai" to "ей", "ey" to "ей", "ow" to "оу", "ou" to "ау",
+        "oa" to "оу", "ew" to "ью", "aw" to "о", "au" to "о",
     )
     private val LATIN = mapOf(
         'a' to "а", 'b' to "б", 'c' to "к", 'd' to "д", 'e' to "е", 'f' to "ф",
@@ -106,12 +139,42 @@ object RuNormalizer {
     )
     private val SOFT_C_G = setOf('e', 'i', 'y')
 
+    /** Аббревиатура по буквам: «TTS» -> «ти ти эс», «USB» -> «ю эс би». */
+    fun spellLetters(word: String): String =
+        word.lowercase().mapNotNull { LETTER_NAMES[it] }.joinToString(" ")
+
+    private val EN_VOWELS = setOf('a', 'e', 'i', 'o', 'u', 'y')
+
+    /** Читать ли латинское слово по буквам (аббревиатуры). */
+    private fun shouldSpell(word: String): Boolean {
+        if (word.length == 1) return true
+        val allCaps = word.all { it.isUpperCase() }
+        val noVowels = word.none { it.lowercaseChar() in EN_VOWELS }
+        // TTS, USB, HDMI — по буквам; NASA, LASER (гласные, длиннее) — словом.
+        return noVowels || (allCaps && word.length <= 4)
+    }
+
+    /** Латинское слово -> русское произношение (словарь, буквы или транслит). */
+    fun latinWordToRussian(word: String): String {
+        EN_WORDS[word.lowercase()]?.let { return it }
+        if (shouldSpell(word)) return spellLetters(word)
+        return transliterate(word)
+    }
+
     /** Практическая латиница -> кириллица («reciter» -> «реситер»). */
     fun transliterate(word: String): String {
-        val w = word.lowercase()
+        var w = word.lowercase()
+        // Немое конечное 'e': like -> лайк-стиль (согласная + e на конце).
+        if (w.length >= 4 && w.last() == 'e' && w[w.length - 2] !in EN_VOWELS) {
+            w = w.dropLast(1)
+        }
         val sb = StringBuilder(w.length + 4)
         var i = 0
         while (i < w.length) {
+            if (i + 2 < w.length) {
+                val tri = TRIGRAPHS[w.substring(i, i + 3)]
+                if (tri != null) { sb.append(tri); i += 3; continue }
+            }
             if (i + 1 < w.length) {
                 val di = DIGRAPHS[w.substring(i, i + 2)]
                 if (di != null) { sb.append(di); i += 2; continue }
@@ -147,7 +210,7 @@ object RuNormalizer {
                 c in 'a'..'z' || c in 'A'..'Z' -> {
                     var j = i
                     while (j < text.length && (text[j] in 'a'..'z' || text[j] in 'A'..'Z')) j++
-                    sb.append(transliterate(text.substring(i, j)))
+                    sb.append(latinWordToRussian(text.substring(i, j)))
                     i = j
                 }
                 SYMBOLS.containsKey(c) -> { sb.append(SYMBOLS[c]); i++ }
