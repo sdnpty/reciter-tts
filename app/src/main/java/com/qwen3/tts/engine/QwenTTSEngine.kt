@@ -107,6 +107,7 @@ class QwenTTSEngine : TextToSpeechService() {
                     val archLc = profile.architecture.lowercase()
                     val b = when {
                         archLc.startsWith("sherpa") -> buildSherpaEngine(profile, archLc)
+                        archLc.startsWith("vosk") -> buildVoskEngine(profile)
                         archLc == "qwen3-codec-ar" || archLc == "qwen3-tts-ar" -> buildArEngine(useNnapi)
                         archLc == "qwen3-codec" || archLc == "" -> buildQwenEngine(profile, useNnapi)
                         archLc == "f5" -> buildF5Engine()
@@ -148,6 +149,14 @@ class QwenTTSEngine : TextToSpeechService() {
     /** F5-TTS (non-autoregressive flow-matching: DiT ODE loop + Vocos). */
     private fun buildF5Engine(): SpeechSynthesizer? =
         com.qwen3.tts.engine.inference.F5InferenceEngine.create(this, ModelConfig.activeModelDir(this))
+
+    /** Vosk-TTS (alphacep) — русский многоголосый VITS со словарными ударениями. */
+    private fun buildVoskEngine(profile: ModelConfig.ModelProfile): SpeechSynthesizer? =
+        com.qwen3.tts.engine.inference.VoskTtsEngine
+            .create(this, ModelConfig.activeModelDir(this))
+            ?.also { e ->
+                e.voiceSidMap = profile.voices.associate { v -> v.id to v.speakerId }
+            }
 
     /** sherpa-onnx (Kokoro / Piper-VITS / Matcha) — fast non-AR, built-in g2p. */
     private fun buildSherpaEngine(profile: ModelConfig.ModelProfile, arch: String): SpeechSynthesizer? =
