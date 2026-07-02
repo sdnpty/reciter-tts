@@ -473,6 +473,18 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
 
     override fun onResume() {
         super.onResume()
+        refreshVoicesAndStatus()
+    }
+
+    // MainActivity switches tabs with show/hide, so onResume does NOT fire when
+    // the user returns from the Models tab after installing a model — voices
+    // looked like they only appeared after an app restart.
+    override fun onHiddenChanged(hidden: Boolean) {
+        super.onHiddenChanged(hidden)
+        if (!hidden && _binding != null) refreshVoicesAndStatus()
+    }
+
+    private fun refreshVoicesAndStatus() {
         viewModel.refreshModelStatus()
         setupModelPicker()
         // Rebuild chips only if the active model's voice set (or custom voices) changed.
@@ -482,6 +494,21 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
             else ModelConfig.activeProfile(requireContext()).voices.map { it.id }
         val latest = (profileIds + CustomVoiceStore.list(requireContext()).map { it.id }).toSet()
         if (lastVoiceIds != latest) setupVoiceChips()
+        updateCloneButtons()
+    }
+
+    /**
+     * Voice cloning (mic recording / audio upload) only works when the active
+     * model actually has a speaker encoder (Qwen family). Hide the buttons for
+     * models that can't clone (sherpa Kokoro/Piper have fixed voice banks).
+     */
+    private fun updateCloneButtons() {
+        val ctx = requireContext()
+        val supported = ModelConfig.installedModels(ctx).isNotEmpty() &&
+            ModelConfig.activeProfile(ctx).modelFiles
+                .any { it.role == ModelConfig.Role.SPEAKER_ENCODER }
+        binding.btnRecordVoice.visibility = if (supported) View.VISIBLE else View.GONE
+        binding.btnUploadVoice.visibility = if (supported) View.VISIBLE else View.GONE
     }
 
     override fun onDestroyView() {
