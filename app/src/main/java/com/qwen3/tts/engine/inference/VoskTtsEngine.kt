@@ -247,10 +247,18 @@ class VoskTtsEngine private constructor(
         val rate = if (speed in 1..1000) speed / 100f else 1f
         val scales = floatArrayOf(noiseLevel, 1f / (speechRate * rate), durationNoiseLevel)
         logger.i(TAG, "synth voice='$voiceName' -> sid=$sid, rate=$rate")
+        // ~120 мс тишины между предложениями: даёт книжный ритм и не даёт
+        // AudioTrack «съедать» хвост фразы на стыке чанков.
+        val pauseBytes = ByteArray(sampleRateHz * 2 * 120 / 1000)
         try {
             for (sentence in splitSentences(text)) {
                 if (stopRequested) break
-                val ids = textToIds(sentence)
+                // Словарь/латиница/числа: без нормализации латиница и цифры
+                // молча выпадают из синтеза (их нет в phoneme_id_map).
+                var s2 = com.qwen3.tts.util.RuNormalizer.normalize(sentence).trim()
+                // VITS «проглатывает» конец фразы без завершающей пунктуации.
+                if (s2.isNotEmpty() && s2.last() !in ".!?;:…,") s2 += "."
+                val ids = textToIds(s2)
                 if (ids.isEmpty()) continue
                 OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())).use { input ->
                 OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(ids.size.toLong())), longArrayOf(1)).use { lens ->
@@ -263,6 +271,7 @@ class VoskTtsEngine private constructor(
                         if (samples.isNotEmpty()) {
                             if (outScale != 1.0f) for (i in samples.indices) samples[i] *= outScale
                             if (!onAudioChunk(AudioHelper.floatToPcm16(samples))) return
+                            if (!stopRequested && !onAudioChunk(pauseBytes)) return
                         }
                     }
                 }}}}
