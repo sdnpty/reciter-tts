@@ -25,7 +25,10 @@ class CheckVoiceData : Activity() {
             TextToSpeech.Engine.CHECK_VOICE_DATA_FAIL
         }
 
-        val available = ArrayList(profile.voices.map {
+        // With no model installed activeProfile() is the compile-time Qwen3
+        // fallback — don't report its locales as available voice data.
+        val voices = if (ModelConfig.installedModels(this).isEmpty()) emptyList() else profile.voices
+        val available = ArrayList(voices.map {
             val l = it.toLocale()
             "${l.language}-${l.country}"
         })

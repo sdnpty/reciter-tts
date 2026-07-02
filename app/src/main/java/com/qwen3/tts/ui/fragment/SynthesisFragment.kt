@@ -331,7 +331,12 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         langChips.clear()
 
         val customVoices = CustomVoiceStore.list(requireContext()).map { it.toVoiceSpec() }
-        val allVoices = profile.voices + customVoices
+        // No installed model => activeProfile() is the compile-time Qwen3 fallback;
+        // don't show its voices as if they were usable.
+        val profileVoices =
+            if (ModelConfig.installedModels(requireContext()).isEmpty()) emptyList()
+            else profile.voices
+        val allVoices = profileVoices + customVoices
         lastVoiceIds = allVoices.map { it.id }.toSet()
 
         val distinctLocales = allVoices.map { it.locale }.distinct()
@@ -471,8 +476,11 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         viewModel.refreshModelStatus()
         setupModelPicker()
         // Rebuild chips only if the active model's voice set (or custom voices) changed.
-        val latest = (ModelConfig.activeProfile(requireContext()).voices.map { it.id } +
-            CustomVoiceStore.list(requireContext()).map { it.id }).toSet()
+        // Mirror setupVoiceChips(): profile voices only count when a model is installed.
+        val profileIds =
+            if (ModelConfig.installedModels(requireContext()).isEmpty()) emptyList()
+            else ModelConfig.activeProfile(requireContext()).voices.map { it.id }
+        val latest = (profileIds + CustomVoiceStore.list(requireContext()).map { it.id }).toSet()
         if (lastVoiceIds != latest) setupVoiceChips()
     }
 

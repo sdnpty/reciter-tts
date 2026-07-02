@@ -210,8 +210,17 @@ class QwenTTSEngine : TextToSpeechService() {
 
     /** Model voices plus the user's recorded (cloned) voices, so both are
      *  selectable through the standard Android TextToSpeech voice API. */
+    /**
+     * Voices of the active profile, but ONLY when a model is actually installed.
+     * With nothing installed activeProfile() falls back to the compile-time Qwen3
+     * profile, and advertising its voices/languages to the system would let client
+     * apps pick a "voice" that can never synthesize.
+     */
+    private fun profileVoices(): List<ModelConfig.VoiceSpec> =
+        if (ModelConfig.installedModels(this).isEmpty()) emptyList() else profile().voices
+
     private fun allVoiceSpecs(): List<ModelConfig.VoiceSpec> =
-        profile().voices + com.qwen3.tts.util.CustomVoiceStore.list(this).map { it.toVoiceSpec() }
+        profileVoices() + com.qwen3.tts.util.CustomVoiceStore.list(this).map { it.toVoiceSpec() }
 
     private fun voiceSpecById(id: String?): ModelConfig.VoiceSpec? =
         allVoiceSpecs().firstOrNull { it.id == id }
@@ -230,7 +239,7 @@ class QwenTTSEngine : TextToSpeechService() {
     }
 
     override fun onIsLanguageAvailable(lang: String, country: String, variant: String): Int {
-        val voices = profile().voices
+        val voices = profileVoices()
         val langMatch = voices.filter { it.toLocale().language.equals(lang, true) }
         return when {
             langMatch.isEmpty() -> TextToSpeech.LANG_NOT_SUPPORTED
@@ -251,7 +260,7 @@ class QwenTTSEngine : TextToSpeechService() {
     }
 
     override fun onGetDefaultVoiceNameFor(lang: String, country: String, variant: String): String? {
-        val voices = profile().voices
+        val voices = profileVoices()
         return (voices.firstOrNull {
             it.toLocale().language.equals(lang, true) && it.toLocale().country.equals(country, true)
         } ?: voices.firstOrNull { it.toLocale().language.equals(lang, true) }

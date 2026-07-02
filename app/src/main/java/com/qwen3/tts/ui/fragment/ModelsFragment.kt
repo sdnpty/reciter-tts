@@ -205,6 +205,19 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
         val installed = ModelConfig.installedModels(requireContext())
         val df = DecimalFormat("#,##0")
 
+        // Nothing installed: activeProfile() falls back to the compile-time Qwen3
+        // profile — showing its name and file list here is misleading. Show a
+        // neutral "no model" card until something is downloaded/imported.
+        if (installed.isEmpty()) {
+            binding.tvModelStatus.text = getString(R.string.status_no_model)
+            binding.tvTotalSize.text = ""
+            binding.btnDownload.isEnabled = true
+            binding.btnDeleteModels.isEnabled = false
+            setupModelPicker()
+            viewModel.refreshModelStatus()
+            return
+        }
+
         var totalSize = 0L
         var allPresent = true
         val sb = StringBuilder()
@@ -237,11 +250,15 @@ class ModelsFragment : Fragment(R.layout.fragment_models) {
             }
         }
 
-        sb.appendLine()
-        sb.appendLine(
-            if (tokenizerAvailable()) "OK  токенайзер: BPE (vocab+merges)"
-            else "!!  токенайзер: байтовый режим — добавьте vocab.json + merges.txt"
-        )
+        // The BPE (vocab+merges) tokenizer is only used by the Qwen family;
+        // sherpa/vits models phonemize internally — no warning for them.
+        if (profile.architecture.startsWith("qwen")) {
+            sb.appendLine()
+            sb.appendLine(
+                if (tokenizerAvailable()) "OK  токенайзер: BPE (vocab+merges)"
+                else "!!  токенайзер: байтовый режим — добавьте vocab.json + merges.txt"
+            )
+        }
 
         binding.tvModelStatus.text = sb.toString()
         binding.tvTotalSize.text = "${df.format(totalSize / (1024 * 1024))} / ${df.format(profile.modelFiles.sumOf { it.expectedSizeMb })} MB"
