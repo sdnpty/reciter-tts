@@ -1,10 +1,11 @@
-# Architecture
+# Архитектура
 
-## Overview
+## Обзор
 
-Reciter TTS is an Android TTS engine that runs Qwen3-TTS inference locally
-via ONNX Runtime. It registers as a system `TextToSpeechService`, so any app
-that uses Android's TTS API will use it automatically once set as default.
+Reciter TTS — Android TTS-движок, выполняющий инференс Qwen3-TTS локально
+через ONNX Runtime. Он регистрируется как системный `TextToSpeechService`,
+поэтому любое приложение, использующее Android TTS API, автоматически работает
+с ним, как только он выбран движком по умолчанию.
 
 ```
 Android System TTS API
@@ -16,98 +17,98 @@ Android System TTS API
   Talker  CodePredictor  Code2Wav  SpeakerEncoder
   (ONNX)    (ONNX)       (ONNX)     (ONNX)
          |
-     PCM-16 audio @ 24 kHz
+     PCM-16 аудио @ 24 кГц
          |
   SynthesisCallback -> AudioTrack
 ```
 
-## TTS Pipeline
+## TTS-пайплайн
 
-1. **Tokenize** -- `Qwen3Tokenizer` (BPE, vocab.json + merges.txt) converts
-   text to token IDs. Falls back to a byte-level Cyrillic tokenizer if vocab
-   files are missing.
+1. **Токенизация** — `Qwen3Tokenizer` (BPE, vocab.json + merges.txt)
+   преобразует текст в ID токенов. Если файлы словаря отсутствуют, откатывается
+   на байтовый кириллический токенизатор.
 
-2. **Talker** (autoregressive) -- Feeds token IDs through the transformer and
-   greedily decodes audio token IDs until EOS. Audio tokens start at ID 151936
-   (`TokenizerConstants.AUDIO_TOKEN_START`). Produces coarse codec codes
-   (quantizer 0).
+2. **Talker** (авторегрессионный) — пропускает ID токенов через трансформер и
+   жадно декодирует ID аудио-токенов до EOS. Аудио-токены начинаются с ID 151936
+   (`TokenizerConstants.AUDIO_TOKEN_START`). Выдаёт грубые кодек-коды
+   (квантователь 0).
 
-3. **CodePredictor** -- Takes coarse codes and predicts fine codes for
-   quantizers 1..15 via argmax over logits. If unavailable, coarse codes are
-   duplicated across all quantizers (degraded quality, still functional).
+3. **CodePredictor** — по грубым кодам предсказывает тонкие коды для
+   квантователей 1..15 через argmax по логитам. Если модуль недоступен, грубые
+   коды дублируются по всем квантователям (качество ниже, но работает).
 
-4. **Code2Wav** (vocoder) -- Converts the full `[1, 16, seq]` codec tensor to
-   a raw audio waveform `[1, 1, samples]` at 24 kHz.
+4. **Code2Wav** (вокодер) — превращает полный кодек-тензор `[1, 16, seq]` в
+   сырую аудио-волну `[1, 1, samples]` на 24 кГц.
 
-5. **PCM conversion** -- `AudioHelper.floatToPcm16()` converts float samples
-   to 16-bit PCM bytes streamed via `SynthesisCallback`.
+5. **Преобразование в PCM** — `AudioHelper.floatToPcm16()` конвертирует
+   float-сэмплы в 16-битные PCM-байты, которые стримятся через `SynthesisCallback`.
 
-## Module Map
+## Карта модулей
 
 ```
 com.qwen3.tts/
-  QwenTTSApplication         -- Global crash handler, logger init
+  QwenTTSApplication         -- глобальный обработчик крэшей, инициализация логгера
 
   engine/
-    QwenTTSEngine             -- TextToSpeechService implementation
-    CheckVoiceData            -- Android TTS voice data check Activity
-    GetSampleText             -- Android TTS sample text Activity
-    InstallVoiceData          -- Android TTS voice data install Activity
+    QwenTTSEngine             -- реализация TextToSpeechService
+    CheckVoiceData            -- Activity проверки голосовых данных Android TTS
+    GetSampleText             -- Activity выдачи образца текста Android TTS
+    InstallVoiceData          -- Activity установки голосовых данных Android TTS
     inference/
-      QwenInferenceEngine     -- ONNX session management + inference
+      QwenInferenceEngine     -- управление ONNX-сессиями + инференс
     tokenizer/
-      Qwen3Tokenizer          -- BPE tokenizer (singleton)
+      Qwen3Tokenizer          -- BPE-токенизатор (синглтон)
 
   service/
-    ModelDownloadService      -- Foreground service for downloading/importing models
+    ModelDownloadService      -- foreground-сервис загрузки/импорта моделей
 
   ui/
-    MainActivity              -- Single Activity with BottomNavigationView
-    TTSViewModel              -- Shared ViewModel (model status, logger, tokenizer)
+    MainActivity              -- одна Activity с BottomNavigationView
+    TTSViewModel              -- общая ViewModel (статус модели, логгер, токенизатор)
     fragment/
-      SynthesisFragment       -- Text input, language selection, TTS playback
-      ModelsFragment          -- Model status, download/import/delete, audio tests
-      SettingsFragment        -- Speaker ID, speed, device, logging, log viewer
+      SynthesisFragment       -- ввод текста, выбор языка, воспроизведение TTS
+      ModelsFragment          -- статус моделей, загрузка/импорт/удаление, аудиотесты
+      SettingsFragment        -- speaker ID, скорость, устройство, логирование, просмотр логов
 
   util/
-    ModelConfig               -- Model profiles, file paths, readiness checks
-    TokenizerConstants        -- Vocab size, special token IDs
-    AudioHelper               -- PCM conversion, AudioTrack builder
-    TTSLogger                 -- File-based logger with rotation
-    LogShareHelper            -- Log file sharing via FileProvider
+    ModelConfig               -- профили моделей, пути к файлам, проверки готовности
+    TokenizerConstants        -- размер словаря, ID специальных токенов
+    AudioHelper               -- конвертация PCM, конструктор AudioTrack
+    TTSLogger                 -- файловый логгер с ротацией
+    LogShareHelper            -- шаринг лог-файлов через FileProvider
 ```
 
-## Model Slots (multiple installed models)
+## Слоты моделей (несколько установленных моделей)
 
-Several models can be installed side by side. Each lives in its own slot
-directory under the models root:
+Несколько моделей могут быть установлены одновременно. Каждая живёт в своём
+слоте-каталоге внутри корня моделей:
 
 ```
 <external-files>/models/
   <slotId-A>/  talker_base_android.onnx … vocab.json merges.txt model.json
   <slotId-B>/  …
-  talker_base_android.onnx …            # legacy flat layout = "default" slot
+  talker_base_android.onnx …            # старая плоская раскладка = слот "default"
 ```
 
-- Import/download extracts into `models/_incoming/`, then `finalizeSlot()`
-  moves it to `models/<id>/` (id taken from `model.json`, else generated) and
-  marks it active.
-- `ModelConfig.installedModels()` scans slot dirs (+ the legacy flat layout).
-- The active slot id is stored in SharedPreferences (`active_model_id`) and
-  chosen in Settings → Active model. `activeModelDir()` / `activeProfile()`
-  resolve everything (engine paths, tokenizer, presence checks) against it.
-- Switching models resets the tokenizer; the TTS engine picks up the new model
-  on its next (re)load.
+- Импорт/загрузка распаковывается в `models/_incoming/`, затем `finalizeSlot()`
+  переносит его в `models/<id>/` (id берётся из `model.json`, иначе генерируется)
+  и делает активным.
+- `ModelConfig.installedModels()` сканирует каталоги-слоты (+ старую плоскую раскладку).
+- ID активного слота хранится в SharedPreferences (`active_model_id`) и
+  выбирается в «Настройки → Активная модель». `activeModelDir()` / `activeProfile()`
+  разрешают всё (пути движка, токенизатор, проверки наличия) относительно него.
+- Переключение модели сбрасывает токенизатор; TTS-движок подхватывает новую
+  модель при следующей (пере)загрузке.
 
-## Multi-Model Architecture
+## Мультимодельная архитектура
 
-`ModelConfig` supports multiple model profiles through `ModelProfile`:
+`ModelConfig` поддерживает несколько профилей моделей через `ModelProfile`:
 
 ```kotlin
 data class ModelProfile(
     val id: String,              // "qwen3-tts-12hz-0.6b"
-    val displayName: String,     // shown in UI
-    val family: String,          // "qwen3-tts" -- groups related models
+    val displayName: String,     // отображается в UI
+    val family: String,          // "qwen3-tts" -- группирует родственные модели
     val sampleRateHz: Int,       // 24000
     val codecFrameRateHz: Int,   // 12
     val modelFiles: List<ModelFile>,
@@ -115,54 +116,55 @@ data class ModelProfile(
 )
 ```
 
-Each `ModelFile` has a `Role` (TALKER, CODE_PREDICTOR, VOCODER, SPEAKER_ENCODER)
-and metadata (`expectedSizeMb`, `requiredForSynthesis`).
+У каждого `ModelFile` есть `Role` (TALKER, CODE_PREDICTOR, VOCODER, SPEAKER_ENCODER)
+и метаданные (`expectedSizeMb`, `requiredForSynthesis`).
 
-To add a new model:
+Чтобы добавить новую модель:
 
-1. Export ONNX files (see [MODEL_BUILD_PIPELINE.md](MODEL_BUILD_PIPELINE.md))
-2. Add a `ModelProfile` to `ModelConfig.SUPPORTED_PROFILES`
-3. The engine resolves files by `Role`, so different model sizes and filenames
-   work without engine code changes
+1. Экспортируйте ONNX-файлы (см. [MODEL_BUILD_PIPELINE.md](MODEL_BUILD_PIPELINE.md))
+2. Добавьте `ModelProfile` в `ModelConfig.SUPPORTED_PROFILES`
+3. Движок находит файлы по `Role`, поэтому другие размеры и имена файлов
+   работают без изменения кода движка
 
-Currently `ACTIVE_PROFILE` is compile-time. To make it runtime-selectable:
-- Store the selected profile ID in SharedPreferences
-- Read it in `QwenTTSEngine.initEngine()` and `TTSViewModel`
-- Restart the TTS service when the profile changes
+Сейчас `ACTIVE_PROFILE` задаётся на этапе компиляции. Чтобы сделать его
+переключаемым во время выполнения:
+- Храните ID выбранного профиля в SharedPreferences
+- Читайте его в `QwenTTSEngine.initEngine()` и `TTSViewModel`
+- Перезапускайте TTS-сервис при смене профиля
 
-## ONNX Runtime Configuration
+## Конфигурация ONNX Runtime
 
-- **CPU by default**: intra-op threads = `availableProcessors()` clamped to
-  1..4, 1 inter-op thread, `ALL_OPT` graph optimization, memory-pattern
-  pre-allocation disabled to keep the native footprint small and predictable.
-- **NNAPI is opt-in** (Settings → Engine → NNAPI). It can accelerate the
-  vocoder, but INT8-quantized models abort *natively* (SIGABRT) on many device
-  drivers — that is the usual cause of the engine "instantly closing" with
-  nothing in the logs. CPU is the stable default everywhere.
-- **Off-main-thread load**: the TTS service loads sessions on a background
-  thread; the first synthesis request waits on a latch instead of failing.
-- **Crash breadcrumbs**: `TTSLogger.beginLoadStage()` writes a synchronous
-  checkpoint before each native `createSession`. If the process dies natively,
-  the next launch reads the leftover checkpoint and reports exactly where it
-  crashed (`consumeStaleLoadCrash()`), so native crashes are no longer silent.
-- **Runtime version**: 1.26.0 (Maven Central). Compatible with INT8 quantized
-  models at opset 18.
+- **CPU по умолчанию**: intra-op-потоки = `availableProcessors()` с ограничением
+  1..4, 1 inter-op-поток, оптимизация графа `ALL_OPT`, преаллокация memory-pattern
+  отключена, чтобы нативный след памяти оставался небольшим и предсказуемым.
+- **NNAPI включается вручную** (Настройки → Движок → NNAPI). Он может ускорить
+  вокодер, но INT8-квантованные модели на многих драйверах устройств падают
+  *нативно* (SIGABRT) — это обычная причина «мгновенного закрытия» движка без
+  записей в логах. CPU — стабильный вариант по умолчанию везде.
+- **Загрузка вне главного потока**: TTS-сервис загружает сессии в фоновом
+  потоке; первый запрос синтеза ждёт на latch вместо того, чтобы падать.
+- **«Хлебные крошки» крэшей**: `TTSLogger.beginLoadStage()` синхронно пишет
+  чекпоинт перед каждым нативным `createSession`. Если процесс умирает нативно,
+  следующий запуск читает оставшийся чекпоинт и сообщает, где именно произошёл
+  крэш (`consumeStaleLoadCrash()`) — нативные падения больше не «молчаливые».
+- **Версия рантайма**: 1.26.0 (Maven Central). Совместима с INT8-квантованными
+  моделями на opset 18.
 
-## Security
+## Безопасность
 
-- **HTTPS-only downloads**: `ModelDownloadService` rejects non-HTTPS URLs
-- **Path traversal protection**: ZIP extraction validates canonical paths
-- **Network security config**: `network_security_config.xml` restricts
-  cleartext traffic
-- **No secrets in code**: Download URLs are user-provided at runtime
+- **Только HTTPS-загрузки**: `ModelDownloadService` отклоняет не-HTTPS URL
+- **Защита от path traversal**: распаковка ZIP проверяет канонические пути
+- **Network security config**: `network_security_config.xml` ограничивает
+  незашифрованный трафик
+- **Никаких секретов в коде**: URL загрузки задаёт пользователь во время работы
 
-## Build & CI
+## Сборка и CI
 
 - **Gradle**: Kotlin DSL, AGP 8.4.0, Kotlin 1.9.24
 - **SDK**: minSdk 26, targetSdk 34, compileSdk 34, Java 17
-- **CI**: GitHub Actions (`build.yml`) -- JDK 17, Android SDK 34, Gradle cache
-  - Push to main/master: debug build + unit tests
-  - Tag `v*`: release build + GitHub Release
-  - Manual dispatch: debug or release + custom ONNX Runtime version
-- **ProGuard**: Enabled for release (`isMinifyEnabled = true`,
+- **CI**: GitHub Actions (`build.yml`) — JDK 17, Android SDK 34, кэш Gradle
+  - Push в main/master: debug-сборка + юнит-тесты
+  - Тег `v*`: release-сборка + GitHub Release
+  - Ручной запуск: debug или release + произвольная версия ONNX Runtime
+- **ProGuard**: включён для release (`isMinifyEnabled = true`,
   `isShrinkResources = true`)

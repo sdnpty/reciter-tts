@@ -1,119 +1,120 @@
 # Reciter TTS
 
-Android TTS engine powered by Qwen3-TTS with on-device ONNX Runtime inference.
+Android TTS-движок на базе Qwen3-TTS с локальным инференсом через ONNX Runtime.
 
-Registers as a system `TextToSpeechService` -- any app that uses Android's TTS
-API (TalkBack, e-readers, assistants) uses it once set as default.
+Регистрируется как системный `TextToSpeechService` — любое приложение,
+использующее Android TTS API (TalkBack, читалки, ассистенты), работает с ним,
+как только он выбран движком по умолчанию.
 
-## Features
+## Возможности
 
-- **Fully local** -- no internet needed after model download
-- **Multi-language** -- Russian, English, Chinese
-- **System TTS integration** -- works with any Android app via standard TTS API
-- **Material 3 dark UI** -- single Activity with 3-tab navigation
-- **Extensible** -- architecture supports adding new Qwen model variants
+- **Полностью офлайн** — интернет нужен только для загрузки модели
+- **Мультиязычность** — русский, английский, китайский
+- **Интеграция с системным TTS** — работает с любым Android-приложением через стандартный TTS API
+- **Тёмный UI на Material 3** — одна Activity с навигацией по 3 вкладкам
+- **Расширяемость** — архитектура позволяет добавлять новые варианты моделей Qwen
 
-## Requirements
+## Требования
 
 - Android 8.0+ (API 26)
 - ARM64 (arm64-v8a)
-- ~800 MB free storage (models + cache)
-- 4+ GB RAM recommended
+- ~800 МБ свободного места (модели + кэш)
+- Рекомендуется 4+ ГБ ОЗУ
 
-## Architecture
+## Архитектура
 
 ```
-Text -> Qwen3Tokenizer (BPE) -> Talker (autoregressive, 429 MB)
-     -> CodePredictor (77 MB) -> Code2Wav vocoder (210 MB)
-     -> PCM-16 audio @ 24 kHz
+Текст -> Qwen3Tokenizer (BPE) -> Talker (авторегрессионный, 429 МБ)
+      -> CodePredictor (77 МБ) -> Вокодер Code2Wav (210 МБ)
+      -> PCM-16 аудио @ 24 кГц
 ```
 
-4 ONNX models, INT8 quantized, running on ONNX Runtime 1.26.0.
-Total model size: ~724 MB.
+4 ONNX-модели, квантованные в INT8, работают на ONNX Runtime 1.26.0.
+Суммарный размер моделей: ~724 МБ.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full module map and
-multi-model scaling guide.
+Полная карта модулей и руководство по масштабированию на несколько моделей —
+в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
-## Quick Start
+## Быстрый старт
 
-### 1. Build
+### 1. Сборка
 
 ```bash
 ./gradlew assembleDebug
 ```
 
-JDK 17 required. ONNX Runtime 1.26.0 is pulled from Maven Central automatically.
+Нужен JDK 17. ONNX Runtime 1.26.0 подтягивается из Maven Central автоматически.
 
-### 2. Install Models
+### 2. Установка моделей
 
-Models are **not** bundled in the APK. Install them via one of:
+Модели **не** входят в APK. Установить их можно одним из способов:
 
-**Option A: Download in-app**
+**Вариант A: загрузка в приложении**
 
-Open the app -> Models tab -> Download Models -> paste your HTTPS URL to a
-ZIP archive containing the 4 ONNX files.
+Откройте приложение -> вкладка «Модели» -> «Скачать модели» -> вставьте свой
+HTTPS-URL на ZIP-архив с 4 ONNX-файлами.
 
-**Option B: Pick local ZIP**
+**Вариант B: локальный ZIP**
 
-Models tab -> Pick Local ZIP -> select a ZIP file from device storage.
+Вкладка «Модели» -> «Выбрать локальный ZIP» -> выберите ZIP-файл из памяти устройства.
 
-**Option C: Manual copy**
+**Вариант C: ручное копирование**
 
 ```
 adb push models/ /sdcard/Android/data/com.qwen3.tts/files/models/
 ```
 
-Expected files:
+Ожидаемые файлы:
 ```
-talker_base_android.onnx          428 MB
-code_predictor_base_android.onnx   77 MB
-code2wav_android.onnx             210 MB
-speaker_encoder_android.onnx        9 MB
+talker_base_android.onnx          428 МБ
+code_predictor_base_android.onnx   77 МБ
+code2wav_android.onnx             210 МБ
+speaker_encoder_android.onnx        9 МБ
 ```
 
-### 3. Tokenizer
+### 3. Токенизатор
 
-The BPE tokenizer loads `vocab.json` + `merges.txt` from
-`app/src/main/assets/tokenizer/` (bundled in APK) or from the models directory.
+BPE-токенизатор загружает `vocab.json` + `merges.txt` из
+`app/src/main/assets/tokenizer/` (входят в APK) или из каталога моделей.
 
-To download tokenizer files:
+Скачать файлы токенизатора:
 ```bash
 pip install huggingface-hub
 huggingface-cli download Qwen/Qwen3-0.6B vocab.json merges.txt --local-dir app/src/main/assets/tokenizer/
 ```
 
-### 4. Set as Default TTS
+### 4. Выбор движком по умолчанию
 
-Open the app -> Synthesis tab -> "Set as Default TTS" -> select Reciter TTS
-in system settings.
+Откройте приложение -> вкладка «Синтез» -> «Сделать TTS по умолчанию» ->
+выберите Reciter TTS в системных настройках.
 
-## Building Models from Scratch
+## Сборка моделей с нуля
 
-**Easiest:** open [`tools/qwen3_tts_export_colab.ipynb`](tools/qwen3_tts_export_colab.ipynb)
-in Google Colab (GPU runtime) and run all cells. It performs every step and
-downloads a ready-to-import ZIP:
+**Проще всего:** открыть [`tools/qwen3_tts_export_colab.ipynb`](tools/qwen3_tts_export_colab.ipynb)
+в Google Colab (GPU-рантайм) и выполнить все ячейки. Ноутбук проходит все шаги
+и скачивает готовый к импорту ZIP:
 
-1. Install deps → 2. Load Qwen3-TTS → 3. Export **Talker with `lm_head`**
-(logits) → 4. Export **Code Predictor with head** → 5. Code2Wav → 6. Speaker
-Encoder → 7. INT8 quantize → 8. Android optimize → 9. tokenizer
-`vocab.json`+`merges.txt` → 10. **`model.json` manifest** → 11. ZIP.
+1. Установка зависимостей → 2. Загрузка Qwen3-TTS → 3. Экспорт **Talker с `lm_head`**
+(логиты) → 4. Экспорт **Code Predictor с головой** → 5. Code2Wav → 6. Speaker
+Encoder → 7. INT8-квантование → 8. Оптимизация под Android → 9. Токенизатор
+`vocab.json`+`merges.txt` → 10. **Манифест `model.json`** → 11. ZIP.
 
-The same logic lives in [`tools/export_onnx_corrected.py`](tools/export_onnx_corrected.py).
-Then in the app: Models → Pick Local ZIP.
+Та же логика — в [`tools/export_onnx_corrected.py`](tools/export_onnx_corrected.py).
+Затем в приложении: «Модели» → «Выбрать локальный ZIP».
 
-See [docs/MODEL_BUILD_PIPELINE.md](docs/MODEL_BUILD_PIPELINE.md) for the full
-pipeline notes: PyTorch export -> ONNX -> INT8 quantization -> Android optimization.
+Полные заметки по пайплайну (экспорт из PyTorch -> ONNX -> INT8-квантование ->
+оптимизация под Android) — в [docs/MODEL_BUILD_PIPELINE.md](docs/MODEL_BUILD_PIPELINE.md).
 
-## Adding New Model Variants
+## Добавление новых вариантов моделей
 
-The app discovers a model's **languages, voices, file roles, sample rate and
-token offsets** at runtime from an optional `model.json` manifest shipped inside
-the models ZIP. No app code change is needed to add a model of the family —
-just include a manifest.
+Приложение определяет **языки, голоса, роли файлов, частоту дискретизации и
+смещения токенов** модели во время выполнения — из необязательного манифеста
+`model.json` внутри ZIP-архива моделей. Чтобы добавить модель того же семейства,
+менять код приложения не нужно — достаточно вложить манифест.
 
-### `model.json` format
+### Формат `model.json`
 
-Place this file at the root of the models ZIP (next to the `.onnx` files):
+Положите файл в корень ZIP-архива моделей (рядом с `.onnx`-файлами):
 
 ```json
 {
@@ -141,58 +142,58 @@ Place this file at the root of the models ZIP (next to the `.onnx` files):
 }
 ```
 
-- `architecture` selects the inference engine: `qwen3-codec` (default) or
-  `vits`. Other families (cosyvoice, f5, xtts) are planned — see
+- `architecture` выбирает движок инференса: `qwen3-codec` (по умолчанию) или
+  `vits`. Другие семейства (cosyvoice, f5, xtts) — в планах, см.
   [docs/MODELS.md](docs/MODELS.md).
-- `audioTokenStart` / `eosTokenId` let the autoregressive decoder match the
-  exact vocab layout of your export (critical — see ARCHITECTURE).
-- `voices` drives the system TTS voice list, language availability, and the
-  in-app language chips.
-- Any field omitted falls back to the bundled profile in `ModelConfig.kt`.
+- `audioTokenStart` / `eosTokenId` позволяют авторегрессионному декодеру
+  подстроиться под точную раскладку словаря вашего экспорта (критично — см. ARCHITECTURE).
+- `voices` формирует список голосов системного TTS, доступность языков и
+  чипы языков в приложении.
+- Любое пропущенное поле берётся из встроенного профиля в `ModelConfig.kt`.
 
-If no manifest is present, the compile-time `ModelConfig.ACTIVE_PROFILE` is used.
+Если манифеста нет, используется compile-time-профиль `ModelConfig.ACTIVE_PROFILE`.
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
+Подробности — в [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## CI / GitHub Actions
 
-- Push to `main` -> debug build + unit tests
-- Tag `v*` -> release build + GitHub Release
-- Workflow dispatch -> debug/release + custom ONNX Runtime version
+- Push в `main` -> debug-сборка + юнит-тесты
+- Тег `v*` -> release-сборка + GitHub Release
+- Ручной запуск (workflow dispatch) -> debug/release + произвольная версия ONNX Runtime
 
-### Release Signing (optional)
+### Подпись release-сборок (опционально)
 
-Add these secrets to your repository:
-- `KEYSTORE_BASE64` -- base64-encoded keystore.jks
+Добавьте в репозиторий секреты:
+- `KEYSTORE_BASE64` — keystore.jks в base64
 - `KEYSTORE_PASSWORD`
 - `KEY_ALIAS`
 - `KEY_PASSWORD`
 
-## ONNX Runtime Version
+## Версия ONNX Runtime
 
-The project uses **ONNX Runtime 1.26.0** from Maven Central -- the latest
-version with an Android AAR. Version 1.27.0 is Python/C++ only.
+Проект использует **ONNX Runtime 1.26.0** из Maven Central — последнюю версию
+с Android AAR. Версия 1.27.0 существует только для Python/C++.
 
-To use a local AAR instead:
+Чтобы использовать локальный AAR:
 ```bash
 wget https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.26.0/onnxruntime-android-1.26.0.aar
 mv onnxruntime-android-1.26.0.aar app/libs/
 ```
-Then in `app/build.gradle.kts`, replace the Maven dependency with:
+Затем в `app/build.gradle.kts` замените Maven-зависимость на:
 ```kotlin
 implementation(files("libs/onnxruntime-android-1.26.0.aar"))
 ```
 
-## Project Structure
+## Структура проекта
 
 ```
 app/src/main/java/com/qwen3/tts/
-  engine/              TTS service + ONNX inference + tokenizer
-  service/             Model download foreground service
-  ui/                  MainActivity + 3 Fragments + ViewModel
+  engine/              TTS-сервис + ONNX-инференс + токенизатор
+  service/             Foreground-сервис загрузки моделей
+  ui/                  MainActivity + 3 фрагмента + ViewModel
   util/                ModelConfig, AudioHelper, TTSLogger
 ```
 
-## License
+## Лицензия
 
 Apache 2.0

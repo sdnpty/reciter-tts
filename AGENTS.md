@@ -1,16 +1,16 @@
-# Instructions for AI Coding Agents
+# Инструкции для ИИ-агентов
 
-## Core Rules and Guardrails
+## Основные правила и ограничения
 
-1. **NEVER DELETE THE KEYSTORE OR ITS BACKUP:**
-   - **Do not delete `app/debug.keystore` or `debug.keystore.base64`.**
-   - The keystore is critical for signing the debug APK builds both locally and on GitHub Actions CI/CD workflows.
-   - If `app/debug.keystore` is missing, it should be auto-decoded from `debug.keystore.base64` in `app/build.gradle.kts`.
+1. **НИКОГДА НЕ УДАЛЯЙ KEYSTORE И ЕГО РЕЗЕРВНУЮ КОПИЮ:**
+   - **Не удаляй `app/debug.keystore` и `debug.keystore.base64`.**
+   - Keystore критичен для подписи debug-сборок APK — и локально, и в CI/CD на GitHub Actions.
+   - Если `app/debug.keystore` отсутствует, он должен автоматически декодироваться из `debug.keystore.base64` в `app/build.gradle.kts`.
 
-2. **MAINTAIN CI/CD WORKFLOWS:**
-   - Do not remove the keystore restoration steps from `.github/workflows/build.yml`.
-   - Ensure the workflow handles either an existing `app/debug.keystore` or decodes it successfully from `debug.keystore.base64`.
+2. **ПОДДЕРЖИВАЙ CI/CD-WORKFLOW:**
+   - Не удаляй шаги восстановления keystore из `.github/workflows/build.yml`.
+   - Workflow должен работать и с существующим `app/debug.keystore`, и с успешным декодированием из `debug.keystore.base64`.
 
-3. **BUMP VERSION ON EVERY MODIFICATION:**
-   - **Always increment `versionCode` and `versionName` in `app/build.gradle.kts` with every edit/fix/change.**
-   - Increment the `versionCode` by 1 (e.g., `10018` -> `10019`) and increment the patch version of `versionName` (e.g., `"1.0.18"` -> `"1.0.19"`).
+3. **ПОДНИМАЙ ВЕРСИЮ ПРИ КАЖДОМ ИЗМЕНЕНИИ:**
+   - **Всегда увеличивай `versionCode` и `versionName` в `app/build.gradle.kts` при каждой правке/фиксе/изменении.**
+   - `versionCode` увеличивай на 1 (например, `10018` -> `10019`), в `versionName` увеличивай patch-версию (например, `"1.0.18"` -> `"1.0.19"`).

@@ -1,56 +1,58 @@
-# Supported & candidate models (Russian-capable)
+# Поддерживаемые и кандидатные модели (с поддержкой русского)
 
-Reciter is multi-architecture: the active model's `model.json` declares an
-`architecture`, and the TTS service routes to the matching engine. New models
-are added by shipping a manifest (and, for a new architecture, an engine impl).
+Reciter — мультиархитектурный: `model.json` активной модели объявляет
+`architecture`, и TTS-сервис направляет запросы в соответствующий движок.
+Новые модели добавляются поставкой манифеста (а для новой архитектуры — ещё
+и реализацией движка).
 
-| Model | Architecture (`architecture`) | Russian | ONNX / on-device | Status | Notes |
+| Модель | Архитектура (`architecture`) | Русский | ONNX / on-device | Статус | Заметки |
 |---|---|---|---|---|---|
-| **Qwen3-TTS 0.6B** | `qwen3-codec` | ✅ good | yes (4 ONNX, ~550 MB INT8) | **supported** | AR talker → neural codec → code2wav. `tools/export_onnx_corrected.py` |
-| **Qwen2.5-Omni Talker** | `qwen3-codec` | ✅ | yes (same pipeline) | supported* | Same codec contract; export the Talker+Token2Wav, ship a manifest |
-| **MMS-TTS (rus)** | `vits` | ✅ ok | yes (1 ONNX, ~40–145 MB) | **experimental** | `facebook/mms-tts-rus`. `tools/export_mms_vits.py`. Char vocab; verify on device |
-| **Piper (ru_RU-*)** | `vits` | ✅ good | ONNX-native, but needs eSpeak phonemes | planned | Piper ships ONNX + config; on-device **eSpeak-ng phonemizer** is the open piece |
-| **Silero (ru v3/v4)** | `silero` | ✅ excellent | ONNX export exists | planned | Best lightweight Russian; custom symbol set + stress marks; needs a `silero` engine |
-| **XTTS v2 (Coqui)** | `xtts` | ✅ good | heavy (GPT + decoder + HiFiGAN) | planned | Zero-shot cloning; flow/decoder engine required; large |
-| **F5-TTS** | `f5` | ⚠️ varies | flow-matching, multi-ONNX | planned | DiT flow-matching + Vocos; needs reference audio + a `f5` engine |
-| **Fun-CosyVoice3 0.5B** | `cosyvoice` | ✅ improved | LLM + flow-matching + HiFiGAN | **introspection / WIP** | v3 broadened multilingual (Russian decent). `tools/export_cosyvoice3.py`; on-device engine in progress |
-| **CosyVoice 2** | `cosyvoice` | ⚠️ weak | same | not recommended | Mostly zh/en/ja/ko/yue; Russian poor — prefer v3 |
+| **Qwen3-TTS 0.6B** | `qwen3-codec` | ✅ хороший | да (4 ONNX, ~550 МБ INT8) | **поддерживается** | AR talker → нейрокодек → code2wav. `tools/export_onnx_corrected.py` |
+| **Qwen2.5-Omni Talker** | `qwen3-codec` | ✅ | да (тот же пайплайн) | поддерживается* | Тот же контракт кодека; экспортировать Talker+Token2Wav, вложить манифест |
+| **MMS-TTS (rus)** | `vits` | ✅ норм | да (1 ONNX, ~40–145 МБ) | **экспериментально** | `facebook/mms-tts-rus`. `tools/export_mms_vits.py`. Посимвольный словарь; проверить на устройстве |
+| **Piper (ru_RU-*)** | `vits` | ✅ хороший | нативный ONNX, но нужны фонемы eSpeak | в планах | Piper поставляет ONNX + config; открытый вопрос — **eSpeak-ng фонемизатор** на устройстве |
+| **Silero (ru v3/v4)** | `silero` | ✅ отличный | ONNX-экспорт существует | в планах | Лучший лёгкий русский; свой набор символов + ударения; нужен движок `silero` |
+| **XTTS v2 (Coqui)** | `xtts` | ✅ хороший | тяжёлый (GPT + декодер + HiFiGAN) | в планах | Zero-shot-клонирование; нужен flow/decoder-движок; большой |
+| **F5-TTS** | `f5` | ⚠️ по-разному | flow-matching, несколько ONNX | в планах | DiT flow-matching + Vocos; нужны референс-аудио + движок `f5` |
+| **Fun-CosyVoice3 0.5B** | `cosyvoice` | ✅ улучшен | LLM + flow-matching + HiFiGAN | **интроспекция / WIP** | v3 расширил мультиязычность (русский приличный). `tools/export_cosyvoice3.py`; on-device-движок в работе |
+| **CosyVoice 2** | `cosyvoice` | ⚠️ слабый | то же | не рекомендуется | В основном zh/en/ja/ko/yue; русский плохой — берите v3 |
 
-### CosyVoice (`cosyvoice`) — current stage
-`CosyVoiceInferenceEngine` is an **introspection engine**: it loads every
-exported component (LLM / FLOW / VOCODER / SPEAKER_ENCODER / SPEECH_TOKENIZER)
-and logs each one's ONNX input/output names + shapes, then reports "runtime not
-implemented" (no garbage audio). Import the ZIP from `export_cosyvoice3.py`,
-read the component I/O from the in-app log, and use it to implement the runtime
-(AR LLM → speech tokens → CFM ODE steps → HiFiGAN; zero-shot needs reference
-audio). The official tooling exports flow/vocoder; the AR LLM in ONNX is the
-main open piece.
+### CosyVoice (`cosyvoice`) — текущая стадия
+`CosyVoiceInferenceEngine` — **интроспекционный движок**: он загружает каждый
+экспортированный компонент (LLM / FLOW / VOCODER / SPEAKER_ENCODER /
+SPEECH_TOKENIZER), логирует имена и формы ONNX-входов/выходов каждого, затем
+сообщает «runtime not implemented» (без мусорного аудио). Импортируйте ZIP из
+`export_cosyvoice3.py`, прочитайте I/O компонентов из лога приложения и
+используйте это для реализации рантайма (AR LLM → речевые токены → ODE-шаги
+CFM → HiFiGAN; zero-shot требует референс-аудио). Официальный инструментарий
+экспортирует flow/vocoder; AR LLM в ONNX — главный открытый вопрос.
 
-\* drop-in via manifest, no code change.
+\* добавляется манифестом, без изменения кода.
 
-## How architecture routing works
-`QwenTTSEngine.initEngine()` reads `ModelConfig.activeProfile().architecture`:
-- `qwen3-codec` → `QwenInferenceEngine` (autoregressive codec).
-- `vits` → `VitsInferenceEngine` (single-shot `input_ids` → `waveform`).
-- anything else → logged as "not implemented" (no crash); add an engine that
-  implements `SpeechSynthesizer` and a branch here to support it.
+## Как работает маршрутизация архитектур
+`QwenTTSEngine.initEngine()` читает `ModelConfig.activeProfile().architecture`:
+- `qwen3-codec` → `QwenInferenceEngine` (авторегрессионный кодек).
+- `vits` → `VitsInferenceEngine` (один проход: `input_ids` → `waveform`).
+- всё остальное → логируется как «not implemented» (без крэша); чтобы
+  поддержать, добавьте движок, реализующий `SpeechSynthesizer`, и ветку здесь.
 
-## Why not "just add a manifest" for CosyVoice / F5 / XTTS?
-They are **not** autoregressive-codec models. CosyVoice/F5/XTTS use an LLM or
-DiT producing latent/mel features refined by **flow-matching**, then a separate
-neural vocoder — a fundamentally different runtime loop (ODE solver, CFG,
-reference-audio conditioning). Each needs its own `SpeechSynthesizer`
-implementation. The manifest carries their metadata; the engine is the work.
+## Почему для CosyVoice / F5 / XTTS нельзя «просто добавить манифест»?
+Это **не** авторегрессионно-кодековые модели. CosyVoice/F5/XTTS используют LLM
+или DiT, порождающие латентные/мел-фичи, уточняемые **flow-matching**, и затем
+отдельный нейровокодер — принципиально другой цикл рантайма (ODE-солвер, CFG,
+кондиционирование референс-аудио). Каждой нужна своя реализация
+`SpeechSynthesizer`. Манифест несёт их метаданные; движок — вот основная работа.
 
-## Adding a new architecture (checklist)
-1. Implement `SpeechSynthesizer` (see `VitsInferenceEngine` for the simplest example).
-2. Add a branch in `QwenTTSEngine.initEngine()` for the new `architecture` value.
-3. Write an export script under `tools/` that emits ONNX + tokenizer assets +
-   a `model.json` with the new `architecture` and the model's `voices`.
-4. Document it in this table.
+## Добавление новой архитектуры (чек-лист)
+1. Реализуйте `SpeechSynthesizer` (простейший пример — `VitsInferenceEngine`).
+2. Добавьте ветку в `QwenTTSEngine.initEngine()` для нового значения `architecture`.
+3. Напишите экспорт-скрипт в `tools/`, выдающий ONNX + ассеты токенизатора +
+   `model.json` с новой `architecture` и голосами (`voices`) модели.
+4. Задокументируйте её в этой таблице.
 
-## Russian-quality recommendation
-For quality+practicality on-device today: **Qwen3-TTS** (multilingual, this
-app's primary target) and **Silero ru** (best lightweight Russian — worth a
-dedicated engine next). MMS-TTS rus is a quick `vits` win to validate the
-multi-engine path. CosyVoice is not advised for Russian.
+## Рекомендация по качеству русского
+По сочетанию качества и практичности on-device сегодня: **Qwen3-TTS**
+(мультиязычный, основная цель этого приложения) и **Silero ru** (лучший лёгкий
+русский — стоит сделать отдельный движок следующим). MMS-TTS rus — быстрая
+победа на `vits` для проверки мультидвижкового пути. CosyVoice для русского
+не рекомендуется.

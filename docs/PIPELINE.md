@@ -1,15 +1,16 @@
-# Qwen3-TTS on-device pipeline (validated)
+# On-device-пайплайн Qwen3-TTS (проверен)
 
-The whole chain (text → prefill → autoregressive codec generation → code2wav →
-24 kHz audio) is reproduced purely from exported ONNX + raw tables and matches
-PyTorch `model.generate` **bit-exact** (codes 100%, audio identical). Voices are
-baked x-vectors from Russian reference clips; the app can also record new
-reference clips from the mic (see §6) to add user voices on-device.
+Вся цепочка (текст → префилл → авторегрессионная генерация кодек-кодов →
+code2wav → аудио 24 кГц) воспроизведена чисто на экспортированных ONNX + сырых
+таблицах и совпадает с PyTorch `model.generate` **бит-в-бит** (коды 100 %,
+аудио идентично). Голоса — запечённые x-векторы из русских референс-клипов;
+приложение также умеет записывать новые референс-клипы с микрофона (см. §6),
+добавляя пользовательские голоса прямо на устройстве.
 
-## 1. Build the model files (Google Colab, GPU)
+## 1. Сборка файлов модели (Google Colab, GPU)
 
 ```python
-# deps (clean; NO onnxscript — legacy export is used)
+# зависимости (чистые; БЕЗ onnxscript — используется legacy-экспорт)
 !pip install -q torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 !pip install -q transformers==4.57.3 accelerate sentencepiece protobuf huggingface-hub qwen-tts onnx onnxruntime
 
@@ -18,42 +19,42 @@ from qwen_tts import Qwen3TTSModel
 model_wrapper = Qwen3TTSModel.from_pretrained("Qwen/Qwen3-TTS-12Hz-0.6B-Base", device_map="cpu", dtype=torch.float32)
 model = model_wrapper.model; model.eval()
 
-# export every block + tables (writes to /content/qwen3-tts-onnx/android)
+# экспорт всех блоков + таблиц (пишет в /content/qwen3-tts-onnx/android)
 exec(open(download("tools/export_talker_ar.py")).read())
 ```
 
-Outputs (the on-device model set):
+Результат (набор моделей для устройства):
 
-| file | what |
+| файл | что это |
 |---|---|
-| `talker_step.onnx` | 28-layer talker, 1 step, KV cache → logits[3072] + hidden + KV |
-| `subtalker_step.onnx` | 5-layer code predictor, 1 step, KV cache → hidden + KV |
-| `codec_embed.onnx` | code0 (0..3071) → embedding[1024] |
-| `code2wav.onnx` | codes[1,16,T] → audio |
+| `talker_step.onnx` | 28-слойный talker, 1 шаг, KV-кэш → logits[3072] + hidden + KV |
+| `subtalker_step.onnx` | 5-слойный code predictor, 1 шаг, KV-кэш → hidden + KV |
+| `codec_embed.onnx` | code0 (0..3071) → эмбеддинг[1024] |
+| `code2wav.onnx` | codes[1,16,T] → аудио |
 | `text_cond_table.f16` | [151936,1024] = text_projection(text_embedding) |
-| `subtalker_codec_embed.f16` | [15,2048,1024] residual embeddings |
-| `subtalker_heads.f16` | [15,2048,1024] residual head weights (no bias) |
+| `subtalker_codec_embed.f16` | [15,2048,1024] residual-эмбеддинги |
+| `subtalker_heads.f16` | [15,2048,1024] веса residual-голов (без bias) |
 
-The three big ONNX are quantized to INT8 automatically at the end of
-`export_talker_ar.py` (`quantize_for_android()`, QInt8, per_channel for the
-talker) → ~430/80/210 MB, cutting the set from ~1.7 GB to ~700 MB.
+Три больших ONNX автоматически квантуются в INT8 в конце
+`export_talker_ar.py` (`quantize_for_android()`, QInt8, per_channel для
+talker) → ~430/80/210 МБ; набор сжимается с ~1,7 ГБ до ~700 МБ.
 
-## 2. Bake voices (x-vector path)
+## 2. Запекание голосов (путь через x-векторы)
 
-For each Russian reference clip (3–10 s clean speech; the file name becomes the
-voice name): `generate_speaker_prompt(..., x_vector_only_mode=True)` = a 1024-d
-x-vector. Save them concatenated as `baked_voices.bin` + `voices.json`. The
-Colab notebook `tools/qwen3_tts_export_colab.ipynb` does this (cells 4–5) and
-lets you upload your own Russian clips.
+Для каждого русского референс-клипа (3–10 с чистой речи; имя файла становится
+именем голоса): `generate_speaker_prompt(..., x_vector_only_mode=True)` =
+1024-мерный x-вектор. Они сохраняются конкатенацией в `baked_voices.bin` +
+`voices.json`. Это делает Colab-ноутбук `tools/qwen3_tts_export_colab.ipynb`
+(ячейки 4–5), позволяя загрузить и собственные русские клипы.
 
-## 3. On-device algorithm (ported in QwenArEngine.kt)
+## 3. Алгоритм на устройстве (портирован в QwenArEngine.kt)
 
-Constants: H=1024, talker layers=28, subtalker layers=5, kv_heads=8, head_dim=128,
-groups=15, EOS=2150, codebook0 range [0,2048), suppress 2048..3071 except EOS,
+Константы: H=1024, слоёв talker=28, слоёв subtalker=5, kv_heads=8, head_dim=128,
+groups=15, EOS=2150, диапазон codebook0 [0,2048), подавление 2048..3071 кроме EOS,
 repetition_penalty=1.05. tts_bos/eos/pad=151672/151673/151671. codec
-pad/bos/think/think_bos/think_eos=2148/2149/2154/2156/2157, russian lang=2069.
+pad/bos/think/think_bos/think_eos=2148/2149/2154/2156/2157, русский язык=2069.
 
-**Prefill** (build from input_ids = role(3)+text+suffix(5), and the voice x-vector):
+**Префилл** (собирается из input_ids = role(3)+text+suffix(5) и x-вектора голоса):
 ```
 role   = text_cond(input_ids[:3])                              # 3
 codec0 = codec_embed([think, think_bos, lang, think_eos])      # 4
@@ -63,54 +64,55 @@ tie    = [tts_pad*5, tts_bos] + codec_input[:6]                # 6
 prefill = [role, tie, text_cond(input_ids[3]) + codec_input[6]]  # 10
 trailing_text = [text_cond(input_ids[4:-5]), tts_eos]
 ```
-Feed the 10 prefill vectors through `talker_step` one at a time (positions 0..9,
-3D position_ids = arange, empty→growing KV). The last step's logits give code0[0]
-and its hidden is `past_hidden`.
+10 векторов префилла прогоняются через `talker_step` по одному (позиции 0..9,
+3D position_ids = arange, пустой→растущий KV). Логиты последнего шага дают
+code0[0], а его hidden — это `past_hidden`.
 
-**AR loop** per frame (until code0==EOS):
+**AR-цикл** на кадр (пока code0 != EOS):
 ```
 last_id = codec_embed(code0)
-# subtalker: feed past_hidden(pos0), last_id(pos1) → head[0] → code_1
-#   then for g in 1..14: emb = subtalker_codec_embed[g-1][code_g]; step; head[g] → code_(g+1)
-residual = 15 codes
+# subtalker: подать past_hidden(pos0), last_id(pos1) → head[0] → code_1
+#   затем для g in 1..14: emb = subtalker_codec_embed[g-1][code_g]; шаг; head[g] → code_(g+1)
+residual = 15 кодов
 frame = [code0] + residual
 s = last_id + Σ subtalker_codec_embed[g][residual[g]]  (g=0..14)
-s += (trailing_text[step] if step < len else tts_pad)
+s += (trailing_text[step] если step < len, иначе tts_pad)
 logits, hidden = talker_step(s, pos++, KV)
-code0 = select(logits)   # repetition_penalty on code0 history + suppress specials
+code0 = select(logits)   # repetition_penalty по истории code0 + подавление спецтокенов
 past_hidden = hidden; step++
 ```
-Stack frames → `[1,16,T]` → `code2wav.onnx` → PCM.
+Кадры складываются в `[1,16,T]` → `code2wav.onnx` → PCM.
 
-Reference implementations: `tools/infer_onnx_reference.py` (AR loop) and
-`tools/build_prefill.py` (prefill) — both validated against PyTorch.
+Эталонные реализации: `tools/infer_onnx_reference.py` (AR-цикл) и
+`tools/build_prefill.py` (префилл) — обе сверены с PyTorch.
 
-## 4. Asset layout on device
+## 4. Раскладка ассетов на устройстве
 
-`<filesDir>/models/qwen3-ar/` containing the files from step 1 (INT8) +
-`baked_voices.bin` (concatenated float32 x-vectors) + `voices.json` (names) +
-`vocab.json`, `merges.txt` for the tokenizer.
+`<filesDir>/models/qwen3-ar/` с файлами из шага 1 (INT8) +
+`baked_voices.bin` (конкатенированные float32 x-векторы) + `voices.json`
+(имена) + `vocab.json`, `merges.txt` для токенизатора.
 
-## 5. inputIdsFor (from ar_config.json, captured)
+## 5. inputIdsFor (из ar_config.json, снято с модели)
 
 ```
 role_tokens   = [151644, 77091, 198]                 # <|im_start|>assistant\n
 suffix_tokens = [151645, 198, 151644, 77091, 198]    # <|im_end|>\n<|im_start|>assistant\n
 inputIdsFor(text) = role_tokens + Qwen3Tokenizer.encodeForTTS(text) + suffix_tokens
 ```
-Voices baked: Russian reference clips (one x-vector each, named by file).
+Запечённые голоса: русские референс-клипы (по одному x-вектору, имя — по файлу).
 
-## 6. On-device voice cloning (mic)
+## 6. Клонирование голоса на устройстве (микрофон)
 
-The app records a 16 kHz mono reference clip (`VoiceRecorder`), stores it via
-`CustomVoiceStore` under `filesDir/custom_voices/<id>.wav`, and shows it as a
-voice chip on the Synthesis tab. `speaker_encoder.onnx` bakes the Kaldi fbank
-frontend into the graph (waveform → x-vector), so `VoiceCloner` computes the
-1024-d x-vector from the raw clip with no on-device DSP, caches it as
-`<id>.xvec`, and `QwenArEngine` merges these into its voice map at load — so a
-recorded voice synthesizes exactly like a baked one. If the active model has no
-encoder the clip is still kept and is cloned once such a model is active.
+Приложение записывает моно-референс 16 кГц (`VoiceRecorder`), сохраняет его
+через `CustomVoiceStore` в `filesDir/custom_voices/<id>.wav` и показывает как
+чип голоса на вкладке «Синтез». `speaker_encoder.onnx` содержит Kaldi-fbank
+фронтенд прямо в графе (волна → x-вектор), поэтому `VoiceCloner` вычисляет
+1024-мерный x-вектор из сырого клипа без DSP на устройстве, кэширует его как
+`<id>.xvec`, а `QwenArEngine` подмешивает такие голоса в свою карту при
+загрузке — записанный голос синтезируется точно так же, как запечённый. Если у
+активной модели нет энкодера, клип всё равно сохраняется и клонируется, как
+только такая модель станет активной.
 
-`export_talker_ar.py` probes the encoder's feature layout, wraps it with
-torchaudio's Kaldi fbank (80/128-mel, 25/10 ms, povey window, utterance CMN),
-and validates the waveform→x-vector graph against `generate_speaker_prompt`.
+`export_talker_ar.py` определяет раскладку фич энкодера, оборачивает его
+Kaldi-fbank из torchaudio (80/128 мел, 25/10 мс, окно povey, utterance-CMN) и
+сверяет граф «волна → x-вектор» с `generate_speaker_prompt`.
