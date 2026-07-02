@@ -170,6 +170,9 @@ class SherpaTtsEngine private constructor(
         val engine = tts ?: run { onAudioChunk(null); return }
         val sid = voiceName.toIntOrNull() ?: voiceSidMap[voiceName] ?: 0
         val rate = if (speed in 1..1000) speed / 100f else 1f
+        logger.i(TAG, "synth voice='$voiceName' -> sid=$sid, lang='${currentLang.ifEmpty { "en/zh" }}'" +
+            if (voiceSidMap.containsKey(voiceName) || voiceName.toIntOrNull() != null) ""
+            else " (UNKNOWN voice id — check the manifest, using sid=0)")
         try {
             val audio = engine.generate(text, sid, rate)
             val samples = audio.samples

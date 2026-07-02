@@ -304,13 +304,28 @@ class QwenTTSEngine : TextToSpeechService() {
 
         val pitch = request.pitch
         val speed = request.speechRate
+        // Reader apps usually don't set a voice on the request; honour the voice
+        // the user picked in the app (persisted) before language-based fallback.
+        val storedDefault = ModelConfig.defaultVoiceId(this)
+            ?.takeIf { id -> allVoiceSpecs().any { it.id == id } }
         val voiceName = request.voiceName
+            ?: storedDefault?.takeIf { id ->
+                val reqLang = request.language ?: ""
+                if (reqLang.isEmpty()) true else {
+                    val l = voiceSpecById(id)?.toLocale()
+                    l?.language.equals(reqLang, true) ||
+                        runCatching { l?.isO3Language }.getOrNull().equals(reqLang, true)
+                }
+            }
             ?: profile().voiceForLanguage(request.language ?: "")?.id
+            ?: storedDefault
             ?: profile().defaultVoice()?.id
             ?: "ru_male_1"
 
         Log.d(TAG, "Synthesize: text=${text.take(50)}, pitch=$pitch, speed=$speed, voice=$voiceName")
         logger.i(TAG, "Synthesis requested: ${text.take(50)}")
+        logger.i(TAG, "voice=$voiceName (request=${request.voiceName ?: "-"}, " +
+            "lang=${request.language ?: "-"}, stored=${storedDefault ?: "-"})")
 
         val startResult = callback.start(engine.sampleRateHz, AudioFormat.ENCODING_PCM_16BIT, CHANNELS)
         if (startResult != TextToSpeech.SUCCESS) {
@@ -342,8 +357,11 @@ class QwenTTSEngine : TextToSpeechService() {
                         val chunkSize = minOf(maxBuffer, audioChunk.size - offset)
                         val result = callback.audioAvailable(audioChunk, offset, chunkSize)
                         if (result != TextToSpeech.SUCCESS) {
+                            // Client went away (stopped/died) — abort the whole
+                            // synthesis instead of burning CPU on unheard audio.
                             Log.w(TAG, "audioAvailable failed with result: $result")
-                            logger.w(TAG, "audioAvailable failed with result: $result")
+                            logger.w(TAG, "audioAvailable failed ($result) — aborting synthesis")
+                            return@synthesize false
                         }
                         offset += chunkSize
                     }

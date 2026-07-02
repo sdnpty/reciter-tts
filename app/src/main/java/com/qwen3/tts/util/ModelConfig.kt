@@ -267,6 +267,20 @@ object ModelConfig {
         invalidateProfileCache()
     }
 
+    // ── User-selected default voice ──────────────────────────────
+    // Client apps (e-readers) usually don't set a voice on their requests, so
+    // the service used to fall back to the FIRST voice matching the request
+    // language — picking a voice in the app had no effect on system TTS.
+    private const val DEFAULT_VOICE_KEY = "default_voice_id"
+
+    fun defaultVoiceId(context: Context): String? =
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getString(DEFAULT_VOICE_KEY, null)
+
+    fun setDefaultVoiceId(context: Context, id: String) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .putString(DEFAULT_VOICE_KEY, id).apply()
+    }
+
     // ── Active profile resolution (manifest-aware, cached) ───────
 
     @Volatile private var cachedProfile: ModelProfile? = null

@@ -377,19 +377,29 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
     }
 
     private fun updateVoiceChipsForLocale(locale: String, allVoices: List<ModelConfig.VoiceSpec>) {
+        binding.chipGroupVoice.setOnCheckedStateChangeListener(null)
         binding.chipGroupVoice.removeAllViews()
         voiceChips.clear()
 
+        val stored = ModelConfig.defaultVoiceId(requireContext())
         val filteredVoices = allVoices.filter { it.locale.equals(locale, ignoreCase = true) }
+        val checkedIndex = filteredVoices.indexOfFirst { it.id == stored }.coerceAtLeast(0)
         filteredVoices.forEachIndexed { index, spec ->
             val chip = layoutInflater.inflate(
                 R.layout.item_voice_chip, binding.chipGroupVoice, false
             ) as Chip
             chip.id = View.generateViewId()
             chip.text = spec.displayName
-            chip.isChecked = index == 0
+            chip.isChecked = index == checkedIndex
             binding.chipGroupVoice.addView(chip)
             voiceChips[chip.id] = spec
+        }
+
+        // Persist the selection: reader apps don't set a voice on their requests,
+        // so the service uses this stored id as the default (see QwenTTSEngine).
+        binding.chipGroupVoice.setOnCheckedStateChangeListener { _, checkedIds ->
+            val spec = checkedIds.firstOrNull()?.let { voiceChips[it] } ?: return@setOnCheckedStateChangeListener
+            ModelConfig.setDefaultVoiceId(requireContext(), spec.id)
         }
     }
 
