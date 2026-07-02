@@ -173,7 +173,7 @@ class SherpaTtsEngine private constructor(
         try {
             val audio = engine.generate(text, sid, rate)
             val samples = audio.samples
-            if (samples != null && samples.isNotEmpty()) {
+            if (samples.isNotEmpty()) {
                 val chunkSize = 4096
                 var offset = 0
                 while (offset < samples.size && !stopRequested) {

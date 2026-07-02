@@ -46,28 +46,31 @@ class QwenTTSEngineTest {
 
     // --- onIsLanguageAvailable tests ---
 
+    // With no model installed, the engine must not advertise ANY language or
+    // voice — the compile-time Qwen3 fallback profile is metadata only. In this
+    // JVM test environment installedModels() is always empty (no filesystem),
+    // which is exactly the "fresh install" state.
+
     @Test
-    fun `Russian language is available`() {
+    fun `Russian not advertised until a model is installed`() {
         val result = isLanguageAvailable.invoke(engine, "ru", "", "") as Int
-        assertTrue(result >= 0)
+        assertEquals(-2, result) // LANG_NOT_SUPPORTED
     }
 
     @Test
-    fun `Russian with country is country-available`() {
+    fun `Russian with country not advertised until a model is installed`() {
         val result = isLanguageAvailable.invoke(engine, "ru", "RU", "") as Int
-        assertEquals(1, result) // LANG_COUNTRY_AVAILABLE
+        assertEquals(-2, result)
     }
 
     @Test
-    fun `English not supported in Russian-only fallback`() {
-        // The bundled AR model ships Russian voices (FLEURS); other languages
-        // become available only when a model declaring them is installed.
+    fun `English not advertised until a model is installed`() {
         val result = isLanguageAvailable.invoke(engine, "en", "", "") as Int
         assertEquals(-2, result)
     }
 
     @Test
-    fun `Chinese not supported in Russian-only fallback`() {
+    fun `Chinese not advertised until a model is installed`() {
         val result = isLanguageAvailable.invoke(engine, "zh", "", "") as Int
         assertEquals(-2, result)
     }
@@ -93,15 +96,15 @@ class QwenTTSEngineTest {
     // --- onIsValidVoiceName tests ---
 
     @Test
-    fun `ru_male_1 is valid voice`() {
+    fun `ru_male_1 not a valid voice until a model is installed`() {
         val result = isValidVoiceName.invoke(engine, "ru_male_1") as Int
-        assertEquals(1, result)
+        assertEquals(-2, result)
     }
 
     @Test
-    fun `ru_female_1 is valid voice`() {
+    fun `ru_female_1 not a valid voice until a model is installed`() {
         val result = isValidVoiceName.invoke(engine, "ru_female_1") as Int
-        assertEquals(1, result)
+        assertEquals(-2, result)
     }
 
     @Test
