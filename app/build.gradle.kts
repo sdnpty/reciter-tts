@@ -1,6 +1,69 @@
+import java.util.Base64
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+}
+
+val keystoreBase64File = rootProject.file("debug.keystore.base64")
+val keystoreFile = file("debug.keystore")
+
+logger.lifecycle("Auto-keystore-debug: keystoreBase64File path = ${keystoreBase64File.absolutePath}, exists = ${keystoreBase64File.exists()}")
+logger.lifecycle("Auto-keystore-debug: keystoreFile path = ${keystoreFile.absolutePath}, exists = ${keystoreFile.exists()}")
+
+if (keystoreBase64File.exists() && !keystoreFile.exists()) {
+    try {
+        val base64Content = keystoreBase64File.readText().trim()
+        val decoded = Base64.getDecoder().decode(base64Content)
+        keystoreFile.writeBytes(decoded)
+        logger.lifecycle("Successfully auto-decoded debug.keystore from debug.keystore.base64 to ${keystoreFile.absolutePath}")
+    } catch (e: Exception) {
+        logger.error("Failed to auto-decode debug.keystore: ${e.message}", e)
+    }
+}
+
+// Fallback: If still doesn't exist, generate a new one dynamically!
+if (!keystoreFile.exists()) {
+    try {
+        logger.lifecycle("debug.keystore not found. Generating a new one dynamically...")
+        val process = ProcessBuilder(
+            "keytool", "-genkey", "-v",
+            "-keystore", keystoreFile.absolutePath,
+            "-storepass", "android",
+            "-alias", "androiddebugkey",
+            "-keypass", "android",
+            "-keyalg", "RSA",
+            "-keysize", "2048",
+            "-validity", "10000",
+            "-dname", "CN=Android Debug,O=Android,C=US"
+        ).start()
+        val exitCode = process.waitFor()
+        if (exitCode == 0) {
+            logger.lifecycle("Successfully generated a new debug.keystore at ${keystoreFile.absolutePath}")
+        } else {
+            logger.error("Failed to generate debug.keystore, keytool exited with $exitCode")
+        }
+    } catch (e: Exception) {
+        logger.error("Failed to generate debug.keystore dynamically: ${e.message}", e)
+    }
+}
+
+tasks.register("gitAddKeystore") {
+    doLast {
+        try {
+            val process = ProcessBuilder("git", "add", "debug.keystore.base64")
+                .directory(rootDir)
+                .start()
+            val output = process.inputStream.bufferedReader().readText()
+            val error = process.errorStream.bufferedReader().readText()
+            val exitCode = process.waitFor()
+            println("git add output: $output")
+            println("git add error: $error")
+            println("git add debug.keystore.base64 exited with code $exitCode")
+        } catch (e: Exception) {
+            println("Failed to run git add: ${e.message}")
+        }
+    }
 }
 
 android {
@@ -26,8 +89,8 @@ android {
         minSdk = 27
         targetSdk = 34
         // Bump patch (and versionCode) on every commit: 1.0.1 -> 1.0.2 -> ...
-        versionCode = 10019
-        versionName = "1.0.19"
+        versionCode = 10024
+        versionName = "1.0.24"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

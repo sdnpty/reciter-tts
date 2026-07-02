@@ -115,7 +115,74 @@ object ModelConfig {
         )
     )
 
-    val SUPPORTED_PROFILES: List<ModelProfile> = listOf(QWEN3_TTS_12HZ_06B)
+    val ORION_EMOTIONAL_TTS = ModelProfile(
+        id = "orion-emotional",
+        displayName = "Orion AI Emotional TTS (Offline)",
+        family = "orion",
+        architecture = "sherpa-kokoro",
+        sampleRateHz = 24_000,
+        codecFrameRateHz = 0,
+        audioTokenStart = 0,
+        eosTokenId = 0,
+        modelFiles = listOf(
+            ModelFile("model.onnx", 340L, Role.TALKER),
+            ModelFile("voices.bin", 25L, Role.VOCODER)
+        ),
+        tokenizerFiles = listOf(
+            "tokens.txt", "espeak-ng-data"
+        ),
+        voices = listOf(
+            VoiceSpec("orion_bella", "en-US", "Bella (Joy)", speakerId = 0),
+            VoiceSpec("orion_nicole", "en-US", "Nicole (Calm)", speakerId = 1),
+            VoiceSpec("orion_sarah", "en-US", "Sarah (Soft)", speakerId = 2),
+            VoiceSpec("orion_sky", "en-US", "Sky (Neutral)", speakerId = 3),
+            VoiceSpec("orion_ethan", "en-US", "Ethan (Warm)", speakerId = 4),
+            VoiceSpec("orion_liam", "en-US", "Liam (Narrative)", speakerId = 5),
+            VoiceSpec("orion_emma", "en-US", "Emma (UK Female)", speakerId = 6),
+            VoiceSpec("orion_isabella", "en-US", "Isabella (UK Female)", speakerId = 7),
+            VoiceSpec("orion_george", "en-US", "George (UK Male)", speakerId = 8),
+            VoiceSpec("orion_lewis", "en-US", "Lewis (UK Male)", speakerId = 9),
+
+            VoiceSpec("orion_bella_ru", "ru-RU", "Белла", speakerId = 0),
+            VoiceSpec("orion_nicole_ru", "ru-RU", "Николь", speakerId = 1),
+            VoiceSpec("orion_sarah_ru", "ru-RU", "Сара", speakerId = 2),
+            VoiceSpec("orion_sky_ru", "ru-RU", "Скай", speakerId = 3),
+            VoiceSpec("orion_ethan_ru", "ru-RU", "Итан", speakerId = 4),
+            VoiceSpec("orion_liam_ru", "ru-RU", "Лиам", speakerId = 5),
+            VoiceSpec("orion_emma_ru", "ru-RU", "Эмма", speakerId = 6),
+            VoiceSpec("orion_isabella_ru", "ru-RU", "Изабелла", speakerId = 7),
+            VoiceSpec("orion_george_ru", "ru-RU", "Джеймс", speakerId = 8),
+            VoiceSpec("orion_lewis_ru", "ru-RU", "Льюис", speakerId = 9)
+        )
+    )
+
+    val ORION_RUSSIAN_TTS = ModelProfile(
+        id = "orion-russian",
+        displayName = "Orion Russian TTS (Offline)",
+        family = "orion",
+        architecture = "sherpa-kokoro",
+        sampleRateHz = 24_000,
+        codecFrameRateHz = 0,
+        audioTokenStart = 0,
+        eosTokenId = 0,
+        modelFiles = listOf(
+            ModelFile("model.onnx", 340L, Role.TALKER),
+            ModelFile("voices.bin", 25L, Role.VOCODER)
+        ),
+        tokenizerFiles = listOf(
+            "tokens.txt", "espeak-ng-data"
+        ),
+        voices = listOf(
+            VoiceSpec("orion_multilingual_female", "ru-RU", "Orion Multi (Русский жен. с акц.)", speakerId = 0),
+            VoiceSpec("orion_multilingual_male", "ru-RU", "Orion Multi (Русский муж. с акц.)", speakerId = 4)
+        )
+    )
+
+    val SUPPORTED_PROFILES: List<ModelProfile> = listOf(
+        QWEN3_TTS_12HZ_06B,
+        ORION_EMOTIONAL_TTS,
+        ORION_RUSSIAN_TTS
+    )
 
     /** Compile-time fallback when no manifest is installed. */
     val ACTIVE_PROFILE: ModelProfile = QWEN3_TTS_12HZ_06B

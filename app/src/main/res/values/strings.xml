@@ -113,6 +113,8 @@
     <string name="header_models_sub">Загрузка и управление ONNX-моделями</string>
     <string name="header_settings_sub">Голос, движок и диагностика</string>
     <string name="label_text_input">Текст</string>
+    <string name="label_language">Язык</string>
+    <string name="label_voice">Голос</string>
     <string name="label_model">Модель</string>
     <string name="model_single">Установлена одна модель</string>
     <string name="label_my_voices">Мои голоса</string>

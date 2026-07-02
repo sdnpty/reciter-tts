@@ -77,6 +77,18 @@ jobs:
           curl -fL --retry 4 --retry-delay 3 -o app/libs/sherpa-onnx.aar "$URL"
           ls -la app/libs/
 
+      - name: Restore or Generate Debug Keystore
+        run: |
+          if [ -f "app/debug.keystore" ]; then
+            echo "debug.keystore already exists in app/."
+          elif [ -f "debug.keystore.base64" ]; then
+            echo "Decoding debug.keystore.base64 to app/debug.keystore..."
+            base64 -d debug.keystore.base64 > app/debug.keystore
+          else
+            echo "debug.keystore and base64 backup not found. Generating a new debug.keystore..."
+            keytool -genkey -v -keystore app/debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
       - name: Run unit tests
         run: ./gradlew testDebugUnitTest --no-daemon
 

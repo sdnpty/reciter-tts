@@ -319,33 +319,72 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         }
     }
 
+    // chipId -> locale string
+    private val langChips = mutableMapOf<Int, String>()
     // chipId -> VoiceSpec, rebuilt from the active model profile/manifest.
     private val voiceChips = mutableMapOf<Int, ModelConfig.VoiceSpec>()
+    private var lastVoiceIds = emptySet<String>()
 
     private fun setupVoiceChips() {
         val profile = ModelConfig.activeProfile(requireContext())
         binding.chipGroupLang.removeAllViews()
-        voiceChips.clear()
+        langChips.clear()
 
         val customVoices = CustomVoiceStore.list(requireContext()).map { it.toVoiceSpec() }
         val allVoices = profile.voices + customVoices
+        lastVoiceIds = allVoices.map { it.id }.toSet()
 
-        allVoices.forEachIndexed { index, spec ->
+        val distinctLocales = allVoices.map { it.locale }.distinct()
+        if (distinctLocales.isEmpty()) {
+            binding.chipGroupVoice.removeAllViews()
+            voiceChips.clear()
+            return
+        }
+
+        distinctLocales.forEachIndexed { index, loc ->
             val chip = layoutInflater.inflate(
                 R.layout.item_voice_chip, binding.chipGroupLang, false
             ) as Chip
             chip.id = View.generateViewId()
-            chip.text = spec.displayName
+            
+            val parts = loc.split('-', '_')
+            val locale = if (parts.size >= 2) Locale(parts[0], parts[1]) else Locale(parts[0])
+            val displayName = locale.getDisplayLanguage(Locale.getDefault()).replaceFirstChar { it.uppercase() }
+            
+            chip.text = displayName
             chip.isChecked = index == 0
             binding.chipGroupLang.addView(chip)
-            voiceChips[chip.id] = spec
+            langChips[chip.id] = loc
         }
 
-        profile.voices.firstOrNull()?.let { binding.etInput.setText(sampleTextFor(it.languageTag())) }
+        val initialLoc = distinctLocales.firstOrNull() ?: "ru-RU"
+        updateVoiceChipsForLocale(initialLoc, allVoices)
+
+        val initialLangCode = initialLoc.split('-', '_').firstOrNull()?.lowercase() ?: initialLoc
+        binding.etInput.setText(sampleTextFor(initialLangCode))
 
         binding.chipGroupLang.setOnCheckedStateChangeListener { _, checkedIds ->
-            val spec = checkedIds.firstOrNull()?.let { voiceChips[it] } ?: return@setOnCheckedStateChangeListener
-            binding.etInput.setText(sampleTextFor(spec.languageTag()))
+            val loc = checkedIds.firstOrNull()?.let { langChips[it] } ?: return@setOnCheckedStateChangeListener
+            updateVoiceChipsForLocale(loc, allVoices)
+            val langCode = loc.split('-', '_').firstOrNull()?.lowercase() ?: loc
+            binding.etInput.setText(sampleTextFor(langCode))
+        }
+    }
+
+    private fun updateVoiceChipsForLocale(locale: String, allVoices: List<ModelConfig.VoiceSpec>) {
+        binding.chipGroupVoice.removeAllViews()
+        voiceChips.clear()
+
+        val filteredVoices = allVoices.filter { it.locale.equals(locale, ignoreCase = true) }
+        filteredVoices.forEachIndexed { index, spec ->
+            val chip = layoutInflater.inflate(
+                R.layout.item_voice_chip, binding.chipGroupVoice, false
+            ) as Chip
+            chip.id = View.generateViewId()
+            chip.text = spec.displayName
+            chip.isChecked = index == 0
+            binding.chipGroupVoice.addView(chip)
+            voiceChips[chip.id] = spec
         }
     }
 
@@ -357,7 +396,7 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
     }
 
     private fun selectedVoice(): ModelConfig.VoiceSpec? =
-        voiceChips[binding.chipGroupLang.checkedChipId] ?: voiceChips.values.firstOrNull()
+        voiceChips[binding.chipGroupVoice.checkedChipId] ?: voiceChips.values.firstOrNull()
 
     private fun getSelectedLocale(): Locale = selectedVoice()?.toLocale() ?: Locale("ru", "RU")
 
@@ -432,10 +471,9 @@ class SynthesisFragment : Fragment(R.layout.fragment_synthesis) {
         viewModel.refreshModelStatus()
         setupModelPicker()
         // Rebuild chips only if the active model's voice set (or custom voices) changed.
-        val current = voiceChips.values.map { it.id }.toSet()
         val latest = (ModelConfig.activeProfile(requireContext()).voices.map { it.id } +
             CustomVoiceStore.list(requireContext()).map { it.id }).toSet()
-        if (current != latest) setupVoiceChips()
+        if (lastVoiceIds != latest) setupVoiceChips()
     }
 
     override fun onDestroyView() {

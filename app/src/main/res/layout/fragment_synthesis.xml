@@ -237,13 +237,51 @@
                 </com.google.android.material.textfield.TextInputLayout>
 
                 <!-- Voice/language chips — populated at runtime from the model -->
-                <com.google.android.material.chip.ChipGroup
-                    android:id="@+id/chipGroupLang"
-                    android:layout_width="match_parent"
+                <TextView
+                    android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="14dp"
-                    app:singleSelection="true"
-                    app:selectionRequired="true" />
+                    android:text="@string/label_language"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginTop="4dp">
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupLang"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:singleLine="true"
+                        app:singleSelection="true"
+                        app:selectionRequired="true" />
+                </HorizontalScrollView>
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="@string/label_voice"
+                    android:textColor="@color/text_muted"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+
+                <HorizontalScrollView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:scrollbars="none"
+                    android:layout_marginTop="4dp">
+                    <com.google.android.material.chip.ChipGroup
+                        android:id="@+id/chipGroupVoice"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        app:singleLine="true"
+                        app:singleSelection="true"
+                        app:selectionRequired="true" />
+                </HorizontalScrollView>
 
                 <!-- Synthesis progress -->
                 <com.google.android.material.progressindicator.LinearProgressIndicator

@@ -54,45 +54,7 @@ class SherpaTtsEngine private constructor(
 
     private fun path(name: String) = File(modelDir, name).let { if (it.exists()) it.absolutePath else "" }
 
-    /**
-     * sherpa's native init calls exit()/abort() (NOT a catchable exception) when a
-     * required model file is missing — that aborts the whole process, which is the
-     * "crash at model load" symptom. So validate every required path in Kotlin
-     * FIRST and bail with a normal null return if anything is absent.
-     *
-     * Returns a human-readable list of missing pieces, or empty if all present.
-     */
-    private fun missingRequired(): List<String> {
-        val missing = mutableListOf<String>()
-        val model = path("model.onnx").ifEmpty { find { it.endsWith(".onnx") } }
-        if (model.isEmpty()) missing += "model .onnx"
-        if (path("tokens.txt").isEmpty()) missing += "tokens.txt"
-        if (!File(modelDir, "espeak-ng-data").isDirectory) missing += "espeak-ng-data/"
-        if (arch.contains("kokoro")) {
-            if (path("voices.bin").isEmpty()) missing += "voices.bin"
-            // Kokoro's multi-lang model requires the phoneme dict/ and at least one
-            // lexicon-*.txt; without them sherpa aborts the process during load.
-            if (!File(modelDir, "dict").isDirectory) missing += "dict/"
-            val hasLexicon = listOf("lexicon-us-en.txt", "lexicon-zh.txt", "lexicon.txt")
-                .any { File(modelDir, it).exists() }
-            if (!hasLexicon) missing += "lexicon-*.txt"
-        }
-        return missing
-    }
-
     private fun build(): OfflineTts? {
-        val missing = missingRequired()
-        if (missing.isNotEmpty()) {
-            logger.e(
-                TAG,
-                "sherpa model incomplete ($arch) — missing: ${missing.joinToString(", ")}. " +
-                    "Refusing to init (native sherpa would abort the process). Repackage " +
-                    "the model archive with these files.",
-                null,
-            )
-            return null
-        }
-
         val tokens = path("tokens.txt")
         val dataDir = File(modelDir, "espeak-ng-data").let { if (it.isDirectory) it.absolutePath else "" }
         val cores = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)
@@ -104,10 +66,10 @@ class SherpaTtsEngine private constructor(
                     voices = path("voices.bin"),
                     tokens = tokens,
                     dataDir = dataDir,
-                    dictDir = File(modelDir, "dict").let { if (it.isDirectory) it.absolutePath else "" },
-                    lexicon = listOf("lexicon-us-en.txt", "lexicon-zh.txt", "lexicon.txt")
-                        .map { File(modelDir, it) }.filter { it.exists() }
-                        .joinToString(",") { it.absolutePath },
+                    dictDir = path("dict"),
+                    lexicon = modelDir.listFiles()
+                        ?.filter { it.isFile && it.name.startsWith("lexicon") && it.name.endsWith(".txt") }
+                        ?.joinToString(",") { it.absolutePath } ?: "",
                 ),
                 numThreads = cores, provider = "cpu",
             )
@@ -144,23 +106,24 @@ class SherpaTtsEngine private constructor(
         val sid = voiceName.toIntOrNull() ?: voiceSidMap[voiceName] ?: 0
         val rate = if (speed in 1..1000) speed / 100f else 1f
         try {
-            // Per-sentence generate() (the most-tested sherpa path) — emit each
-            // sentence as a chunk so playback starts quickly.
-            for (chunk in splitSentences(text)) {
-                if (stopRequested) break
-                val audio = engine.generate(text = chunk, sid = sid, speed = rate)
-                if (audio.samples.isEmpty()) continue
-                if (!onAudioChunk(AudioHelper.floatToPcm16(audio.samples))) break
+            val audio = engine.generate(text, sid, rate)
+            val samples = audio.samples
+            if (samples != null && samples.isNotEmpty()) {
+                val chunkSize = 4096
+                var offset = 0
+                while (offset < samples.size && !stopRequested) {
+                    val length = minOf(chunkSize, samples.size - offset)
+                    val chunk = samples.copyOfRange(offset, offset + length)
+                    val continueStreaming = onAudioChunk(AudioHelper.floatToPcm16(chunk))
+                    if (!continueStreaming) {
+                        break
+                    }
+                    offset += length
+                }
             }
         } catch (e: Throwable) {
             logger.e(TAG, "sherpa synthesis failed: ${e.message}", Exception(e)); onAudioChunk(null)
         }
-    }
-
-    /** Split into sentences so playback can start after the first one. */
-    private fun splitSentences(text: String): List<String> {
-        val parts = text.split(Regex("(?<=[.!?…\\n])\\s+")).map { it.trim() }.filter { it.isNotEmpty() }
-        return if (parts.isEmpty()) listOf(text.trim()) else parts
     }
 
     /** voice id -> speaker index, filled by the engine builder from the manifest. */
