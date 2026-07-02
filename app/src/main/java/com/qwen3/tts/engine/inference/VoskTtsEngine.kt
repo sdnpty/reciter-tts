@@ -89,7 +89,7 @@ class VoskTtsEngine private constructor(
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
     private val logger = TTSLogger.getInstance(context)
     private var session: OrtSession? = null
-    private var dic: Map<String, String> = emptyMap()
+    @Volatile private var dic: Map<String, String> = emptyMap()
     private var phonemeIdMap: Map<String, Long> = emptyMap()
     private var noiseLevel = 0.8f
     private var speechRate = 1.0f
@@ -106,8 +106,15 @@ class VoskTtsEngine private constructor(
     init {
         try {
             loadConfig()
-            loadDictionary()
             loadSession()
+            // Словарь (2M слов, десятки секунд на телефоне) грузим В ФОНЕ:
+            // движок готов сразу, первые фразы идут через G2P-фолбэк (чуть
+            // хуже ударения пару секунд), затем словарь подхватывается.
+            Thread({
+                try { loadDictionary() } catch (e: Throwable) {
+                    logger.e(TAG, "dictionary load failed: ${e.message}", Exception(e))
+                }
+            }, "vosk-dict").start()
         } catch (e: Throwable) {
             logger.e(TAG, "vosk-tts init failed: ${e.message}", Exception(e))
         }
@@ -148,8 +155,30 @@ class VoskTtsEngine private constructor(
     private fun loadDictionary() {
         val f = File(modelDir, "dictionary")
         if (!f.exists()) { logger.e(TAG, "dictionary missing"); return }
-        val map = HashMap<String, String>(1 shl 20)
-        val probs = HashMap<String, Float>(1 shl 20)
+        val t0 = System.currentTimeMillis()
+
+        // Бинарный кэш: текстовый разбор 2M строк на телефоне занимает десятки
+        // секунд, готовые пары word/phones читаются в разы быстрее.
+        val cache = File(modelDir, "dictionary.bin")
+        if (cache.exists() && cache.lastModified() >= f.lastModified()) {
+            try {
+                java.io.DataInputStream(cache.inputStream().buffered(1 shl 16)).use { ins ->
+                    val n = ins.readInt()
+                    val map = HashMap<String, String>(n * 4 / 3 + 16)
+                    repeat(n) { map[ins.readUTF()] = ins.readUTF() }
+                    dic = map
+                }
+                logger.i(TAG, "vosk dictionary loaded from cache: ${dic.size} words " +
+                    "in ${System.currentTimeMillis() - t0}ms")
+                return
+            } catch (e: Throwable) {
+                logger.w(TAG, "dictionary.bin unreadable (${e.message}), reparsing")
+                cache.delete()
+            }
+        }
+
+        val map = HashMap<String, String>(1 shl 21)
+        val probs = HashMap<String, Float>(1 shl 21)
         f.bufferedReader().useLines { lines ->
             for (line in lines) {
                 // split(maxsplit=2): слово, вероятность, остальное — фонемы
@@ -164,7 +193,18 @@ class VoskTtsEngine private constructor(
             }
         }
         dic = map
-        logger.i(TAG, "vosk dictionary loaded: ${dic.size} words")
+        logger.i(TAG, "vosk dictionary parsed: ${dic.size} words in ${System.currentTimeMillis() - t0}ms")
+
+        try {
+            val tmp = File(modelDir, "dictionary.bin.tmp")
+            java.io.DataOutputStream(tmp.outputStream().buffered(1 shl 16)).use { out ->
+                out.writeInt(map.size)
+                for ((w, p) in map) { out.writeUTF(w); out.writeUTF(p) }
+            }
+            if (!tmp.renameTo(cache)) tmp.delete()
+        } catch (e: Throwable) {
+            logger.w(TAG, "failed to write dictionary.bin: ${e.message}")
+        }
     }
 
     private fun loadSession() {
@@ -188,8 +228,30 @@ class VoskTtsEngine private constructor(
         }
     }
 
+    // Словарь НЕ обязателен для готовности: пока он грузится в фоне, слова
+    // идут через G2P-фолбэк — старт мгновенный, ударения доуточнятся.
     override fun isReady(): Boolean =
-        session != null && dic.isNotEmpty() && phonemeIdMap.isNotEmpty()
+        session != null && phonemeIdMap.isNotEmpty()
+
+    override fun warmup() {
+        // Первый прогон ORT платит за аллокацию арен; прогреваем на межд-
+        // ометии, чтобы первый реальный запрос стартовал без этой пени.
+        try {
+            val ids = textToIds("а.")
+            if (ids.isEmpty()) return
+            val scales = floatArrayOf(noiseLevel, 1f, durationNoiseLevel)
+            val s = session ?: return
+            OnnxTensor.createTensor(env, LongBuffer.wrap(ids), longArrayOf(1, ids.size.toLong())).use { input ->
+            OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(ids.size.toLong())), longArrayOf(1)).use { lens ->
+            OnnxTensor.createTensor(env, FloatBuffer.wrap(scales), longArrayOf(3)).use { sc ->
+            OnnxTensor.createTensor(env, LongBuffer.wrap(longArrayOf(0L)), longArrayOf(1)).use { sidT ->
+                s.run(mapOf("input" to input, "input_lengths" to lens, "scales" to sc, "sid" to sidT)).close()
+            }}}}
+            logger.i(TAG, "warmup done")
+        } catch (e: Throwable) {
+            logger.w(TAG, "warmup failed: ${e.message}")
+        }
+    }
 
     // Пунктуация, которую модель знает как отдельные токены (как в synth.py).
     private val puncRegex = Regex("([,.?!;:\"() ])")
@@ -238,6 +300,30 @@ class VoskTtsEngine private constructor(
         return if (parts.isEmpty()) listOf(text.trim()) else parts
     }
 
+    /**
+     * Быстрый старт: у ПЕРВОГО предложения запроса отрезаем первую клаузу
+     * (до запятой/точки с запятой/тире после ~15 символов) и синтезируем её
+     * отдельно — звук начинается через доли секунды, как у облачных движков,
+     * остальное догенерируется, пока клауза играет (RTF < 1).
+     * Возвращает (текст, пауза-после?).
+     */
+    private fun planChunks(text: String): List<Pair<String, Boolean>> {
+        val sentences = splitSentences(text)
+        val out = ArrayList<Pair<String, Boolean>>(sentences.size + 1)
+        sentences.forEachIndexed { idx, s ->
+            if (idx == 0 && s.length > 40) {
+                val cut = Regex("[,;:—–]\\s").find(s, 15)?.range?.last
+                if (cut != null && cut < s.length - 10) {
+                    out.add(s.substring(0, cut + 1).trim() to false)   // клауза, без паузы
+                    out.add(s.substring(cut + 1).trim() to true)
+                    return@forEachIndexed
+                }
+            }
+            out.add(s to true)
+        }
+        return out
+    }
+
     override fun synthesize(
         text: String, voiceName: String, speed: Int, onAudioChunk: (ByteArray?) -> Boolean
     ) {
@@ -251,7 +337,7 @@ class VoskTtsEngine private constructor(
         // AudioTrack «съедать» хвост фразы на стыке чанков.
         val pauseBytes = ByteArray(sampleRateHz * 2 * 120 / 1000)
         try {
-            for (sentence in splitSentences(text)) {
+            for ((sentence, pauseAfter) in planChunks(text)) {
                 if (stopRequested) break
                 // Словарь/латиница/числа: без нормализации латиница и цифры
                 // молча выпадают из синтеза (их нет в phoneme_id_map).
@@ -271,7 +357,7 @@ class VoskTtsEngine private constructor(
                         if (samples.isNotEmpty()) {
                             if (outScale != 1.0f) for (i in samples.indices) samples[i] *= outScale
                             if (!onAudioChunk(AudioHelper.floatToPcm16(samples))) return
-                            if (!stopRequested && !onAudioChunk(pauseBytes)) return
+                            if (pauseAfter && !stopRequested && !onAudioChunk(pauseBytes)) return
                         }
                     }
                 }}}}
