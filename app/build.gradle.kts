@@ -89,8 +89,8 @@ android {
         minSdk = 27
         targetSdk = 34
         // Bump patch (and versionCode) on every commit: 1.0.1 -> 1.0.2 -> ...
-        versionCode = 10027
-        versionName = "1.0.27"
+        versionCode = 10028
+        versionName = "1.0.28"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
