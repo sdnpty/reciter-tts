@@ -54,7 +54,41 @@ class SherpaTtsEngine private constructor(
 
     private fun path(name: String) = File(modelDir, name).let { if (it.exists()) it.absolutePath else "" }
 
+    /**
+     * sherpa's native init calls exit()/abort() (NOT a catchable exception) when a
+     * required model file is missing — that aborts the whole process, which is the
+     * "crash at model load" symptom. So validate every required path in Kotlin
+     * FIRST and bail with a normal null return if anything is absent.
+     */
+    private fun missingRequired(): List<String> {
+        val missing = mutableListOf<String>()
+        if (path("model.onnx").isEmpty() && find { it.endsWith(".onnx") }.isEmpty()) missing += "model .onnx"
+        if (path("tokens.txt").isEmpty()) missing += "tokens.txt"
+        if (!File(modelDir, "espeak-ng-data").isDirectory) missing += "espeak-ng-data/"
+        if (arch.contains("kokoro")) {
+            if (path("voices.bin").isEmpty()) missing += "voices.bin"
+            // The multi-lang Kokoro model aborts natively without dict/ and lexicons.
+            if (!File(modelDir, "dict").isDirectory) missing += "dict/"
+            val hasLexicon = modelDir.listFiles()
+                ?.any { it.isFile && it.name.startsWith("lexicon") && it.name.endsWith(".txt") } == true
+            if (!hasLexicon) missing += "lexicon-*.txt"
+        }
+        return missing
+    }
+
     private fun build(): OfflineTts? {
+        val missing = missingRequired()
+        if (missing.isNotEmpty()) {
+            logger.e(
+                TAG,
+                "sherpa model incomplete ($arch) — missing: ${missing.joinToString(", ")}. " +
+                    "Refusing to init (native sherpa would abort the process). Repackage " +
+                    "the model archive with these files.",
+                null,
+            )
+            return null
+        }
+
         val tokens = path("tokens.txt")
         val dataDir = File(modelDir, "espeak-ng-data").let { if (it.isDirectory) it.absolutePath else "" }
         val cores = Runtime.getRuntime().availableProcessors().coerceIn(1, 4)

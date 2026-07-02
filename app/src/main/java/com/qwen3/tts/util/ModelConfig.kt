@@ -129,7 +129,9 @@ object ModelConfig {
             ModelFile("voices.bin", 25L, Role.VOCODER)
         ),
         tokenizerFiles = listOf(
-            "tokens.txt", "espeak-ng-data"
+            // The multi-lang Kokoro model also needs dict/ and lexicon-*.txt —
+            // sherpa aborts natively at load if they're missing from the archive.
+            "tokens.txt", "espeak-ng-data", "dict", "lexicon-us-en.txt"
         ),
         voices = listOf(
             VoiceSpec("orion_bella", "en-US", "Bella (Joy)", speakerId = 0),
@@ -170,7 +172,9 @@ object ModelConfig {
             ModelFile("voices.bin", 25L, Role.VOCODER)
         ),
         tokenizerFiles = listOf(
-            "tokens.txt", "espeak-ng-data"
+            // The multi-lang Kokoro model also needs dict/ and lexicon-*.txt —
+            // sherpa aborts natively at load if they're missing from the archive.
+            "tokens.txt", "espeak-ng-data", "dict", "lexicon-us-en.txt"
         ),
         voices = listOf(
             VoiceSpec("orion_multilingual_female", "ru-RU", "Orion Multi (Русский жен. с акц.)", speakerId = 0),
