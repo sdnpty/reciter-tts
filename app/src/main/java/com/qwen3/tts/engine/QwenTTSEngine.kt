@@ -153,7 +153,12 @@ class QwenTTSEngine : TextToSpeechService() {
     private fun buildSherpaEngine(profile: ModelConfig.ModelProfile, arch: String): SpeechSynthesizer? =
         com.qwen3.tts.engine.inference.SherpaTtsEngine
             .create(this, ModelConfig.activeModelDir(this), arch)
-            ?.also { it.voiceSidMap = profile.voices.associate { v -> v.id to v.speakerId } }
+            ?.also { e ->
+                e.voiceSidMap = profile.voices.associate { v -> v.id to v.speakerId }
+                e.voiceLangMap = profile.voices.associate { v ->
+                    v.id to com.qwen3.tts.engine.inference.SherpaTtsEngine.espeakLangOf(v.locale)
+                }
+            }
 
     private fun buildQwenEngine(profile: ModelConfig.ModelProfile, useNnapi: Boolean): SpeechSynthesizer {
         val byRole = profile.modelFiles.associateBy { it.role }

@@ -34,10 +34,25 @@ class SherpaTtsEngine private constructor(
             val e = SherpaTtsEngine(context, modelDir, arch.lowercase())
             return if (e.tts != null) e else null
         }
+
+        /**
+         * Maps a voice locale to sherpa's kokoro `lang` (an espeak-ng voice code).
+         * When non-empty, the multi-lang Kokoro frontend phonemizes the WHOLE text
+         * with that espeak voice; when empty it uses the bundled lexicons, whose
+         * espeak fallback is hardwired to en-us — Cyrillic text comes out garbled.
+         * English/Chinese stay on the (higher-quality) lexicon path.
+         */
+        fun espeakLangOf(locale: String): String =
+            when (val lang = locale.split('-', '_').first().lowercase()) {
+                "en", "zh" -> ""
+                else -> lang     // "ru", "fr", "es", ...
+            }
     }
 
     private val logger = TTSLogger.getInstance(context)
     private var tts: OfflineTts? = null
+    /** espeak lang code the current OfflineTts was built with ("" = lexicon mode). */
+    private var currentLang: String = ""
     override var sampleRateHz: Int = 24000; private set
 
     @Volatile private var stopRequested = false
@@ -104,6 +119,9 @@ class SherpaTtsEngine private constructor(
                     lexicon = modelDir.listFiles()
                         ?.filter { it.isFile && it.name.startsWith("lexicon") && it.name.endsWith(".txt") }
                         ?.joinToString(",") { it.absolutePath } ?: "",
+                    // Non-empty => whole text goes through espeak-ng with this voice
+                    // (needed for Russian etc.); empty => en/zh lexicon mode.
+                    lang = currentLang,
                 ),
                 numThreads = cores, provider = "cpu",
             )
@@ -136,6 +154,19 @@ class SherpaTtsEngine private constructor(
         text: String, voiceName: String, speed: Int, onAudioChunk: (ByteArray?) -> Boolean
     ) {
         stopRequested = false
+        // Kokoro phonemizes per-engine, not per-request: switching to a voice of a
+        // different language (ru <-> en) requires rebuilding OfflineTts with the
+        // matching espeak lang. Rare (user switches language), so the reload cost
+        // is acceptable. Callers already serialize synthesize() via SYNTH_LOCK.
+        val wantLang = voiceLangMap[voiceName] ?: ""
+        if (arch.contains("kokoro") && wantLang != currentLang && tts != null) {
+            logger.i(TAG, "kokoro language switch '${currentLang.ifEmpty { "en/zh" }}' -> " +
+                "'${wantLang.ifEmpty { "en/zh" }}' — rebuilding engine")
+            tts?.release(); tts = null
+            currentLang = wantLang
+            tts = build()
+            tts?.let { sampleRateHz = it.sampleRate() }
+        }
         val engine = tts ?: run { onAudioChunk(null); return }
         val sid = voiceName.toIntOrNull() ?: voiceSidMap[voiceName] ?: 0
         val rate = if (speed in 1..1000) speed / 100f else 1f
@@ -162,6 +193,9 @@ class SherpaTtsEngine private constructor(
 
     /** voice id -> speaker index, filled by the engine builder from the manifest. */
     var voiceSidMap: Map<String, Int> = emptyMap()
+
+    /** voice id -> espeak lang code (see [espeakLangOf]), from the manifest locales. */
+    var voiceLangMap: Map<String, String> = emptyMap()
 
     override fun release() { tts?.release(); tts = null }
 }
